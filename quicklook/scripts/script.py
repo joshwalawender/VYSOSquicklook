@@ -66,16 +66,16 @@ def main():
     # this part uses the pkg_resource package to find the full path location
     # of template.cfg or uses the one defines in the command line with the option -c
     if args.config_file is None:
-        pipeline_config_file = 'configs/vysos.cfg'
+        pipeline_config_file = 'configs/pipeline.cfg'
         pipeline_config_fullpath = pkg_resources.resource_filename(pkg, pipeline_config_file)
-        pipeline_config = ConfigClass(pipeline_config_fullpath, default_section='VYSOS20')
+        pipeline_config = ConfigClass(pipeline_config_fullpath, default_section='DEFAULT')
     else:
-        pipeline_config = ConfigClass(args.pipeline_config_file, default_section='VYSOS20')
+        pipeline_config = ConfigClass(args.pipeline_config_file, default_section='DEFAULT')
 
     # END HANDLING OF CONFIGURATION FILES ##########
 
     try:
-        framework = Framework(ExamplePipeline, framework_config_fullpath)
+        framework = Framework(QuickLookPipeline, framework_config_fullpath)
         logging.config.fileConfig(framework_logcfg_fullpath)
         framework.config.instrument = pipeline_config
     except Exception as e:
@@ -86,7 +86,7 @@ def main():
     # this part defines a specific logger for the pipeline, so that
     # we can separate the output of the pipeline
     # from the output of the framework
-    framework.context.pipeline_logger = getLogger(framework_logcfg_fullpath, name="VYSOS20")
+    framework.context.pipeline_logger = getLogger(framework_logcfg_fullpath, name="pipeline")
     framework.logger = getLogger(framework_logcfg_fullpath, name="DRPF")
 
     framework.logger.info("Framework initialized")
@@ -108,6 +108,7 @@ def main():
 
     # ingest an entire directory, trigger "next_file" on each file, optionally continue to monitor if -m is specified
     elif (len(args.infiles) > 0) or args.dirname is not None:
+        framework.logger.info(f'Ingesting {len(args.infiles)} files from {args.dirname}')
         framework.ingest_data(args.dirname, args.infiles, args.monitor)
 
     framework.start(args.queue_manager_only, args.ingest_data_only, args.wait_for_event, args.continuous)
