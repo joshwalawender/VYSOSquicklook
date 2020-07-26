@@ -2,8 +2,9 @@ from pathlib import Path
 
 from astropy.io import fits
 from astropy import units as u
+from astropy import stats
 import ccdproc
-import photutils as phot
+import photutils
 
 from keckdata import fits_reader, VYSOS20
 
@@ -254,9 +255,68 @@ class MakeSourceMask(BasePrimitive):
         """
         self.logger.info("Running MakeSourceMask action")
 
+        self.action.args.source_mask = [None] * len(self.action.args.kd.pixeldata)
         for i,pd in enumerate(self.action.args.kd.pixeldata):
-            source_mask = phot.make_source_mask(pd, self.snr, self.npixels)
+            source_mask = photutils.make_source_mask(pd, self.snr, self.npixels)
+            self.action.args.source_mask[i] = source_mask
 
+        return self.action.args
+
+
+class SubtractBackground(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        """
+        Constructor
+        """
+        BasePrimitive.__init__(self, action, context)
+        # to use the pipeline logger instead of the framework logger, use this:
+        self.logger = context.pipeline_logger
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        some_pre_condition = True
+
+        if some_pre_condition:
+            self.logger.debug("Precondition for Template is satisfied")
+            return True
+        else:
+            return False
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        some_post_condition = True
+
+        if some_post_condition:
+            self.logger.debug("Postcondition for Template is satisfied")
+            return True
+        else:
+            return False
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.logger.info("Running SubtractBackground action")
+        box_size = self.context.config.instrument['VYSOS20'].getint('background_box_size', 128)
+
+        self.action.args.background = [None] * len(self.action.args.kd.pixeldata)
+        for i,pd in enumerate(self.action.args.kd.pixeldata):
+            bkg = photutils.Background2D(pd, box_size=box_size,
+                                         mask=self.action.args.source_mask[i],
+                                         sigma_clip=stats.SigmaClip())
+            self.action.args.background[i] = bkg
+            self.action.args.kd.pixeldata[i].data -= bkg.background
         return self.action.args
 
 
