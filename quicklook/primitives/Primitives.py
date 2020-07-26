@@ -446,6 +446,15 @@ class Record(BasePrimitive):
         """Check for conditions necessary to run this process"""
         some_pre_condition = True
 
+        try:
+            import pymongo
+            self.log.info('Connecting to mongo db at 192.168.1.101')
+            self.mongoclient = pymongo.MongoClient('192.168.1.101', 27017)
+            self.images = self.mongoclient.vysos['images']
+        except:
+            self.log.error('Could not connect to mongo db')
+            some_pre_condition = False
+
         if some_pre_condition:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
             return True
@@ -489,32 +498,21 @@ class Record(BasePrimitive):
         for key in image_info.keys():
             self.log.debug(f'  {key}: {image_info[key]}')
 
-        import pymongo
-
-        self.log.info('Connecting to mongo db at 192.168.1.101')
-        try:
-            client = pymongo.MongoClient('192.168.1.101', 27017)
-            db = client.vysos
-            images = db['images']
-        except:
-            self.log.error('Could not connect to mongo db')
-            raise Exception('Failed to connect to mongo')
-        else:
-            # Remove old entries for this image file
-            deletion = images.delete_many( {'filename': self.action.args.kd.fitsfilename} )
-            self.log.info(f'  Deleted {deletion.deleted_count} previous entries for {self.action.args.kd.fitsfilename}')
+        # Remove old entries for this image file
+        deletion = self.images.delete_many( {'filename': self.action.args.kd.fitsfilename} )
+        self.log.info(f'  Deleted {deletion.deleted_count} previous entries for {self.action.args.kd.fitsfilename}')
 
         # Save new entry for this image file
         self.log.debug('Adding image info to mongo database')
         ## Save document
         try:
-            inserted_id = images.insert_one(image_info).inserted_id
-            self.log.info("  Inserted document id: {inserted_id}")
+            inserted_id = self.images.insert_one(image_info).inserted_id
+            self.log.info(f"  Inserted document id: {inserted_id}")
         except:
             e = sys.exc_info()[0]
             self.log.error('Failed to add new document')
             self.log.error(e)
-        client.close()
+        self.mongoclient.close()
 
         return self.action.args
 
