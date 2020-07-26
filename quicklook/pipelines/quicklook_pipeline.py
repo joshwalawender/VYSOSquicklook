@@ -21,11 +21,10 @@ class QuickLookPipeline(BasePipeline):
         "gain_correct": ("GainCorrect", "correcting_gain", "create_deviation"),
         "create_deviation": ("CreateDeviation", "estimating_uncertainty", "make_source_mask"),
         "make_source_mask": ("MakeSourceMask", "making_source_mask", "subtract_background"),
-        "subtract_background": ("SubtractBackground", "subtracting_background", None),
+        "subtract_background": ("SubtractBackground", "subtracting_background", "extract"),
+        "extract": ("ExtractStars", "extracting_stars", None),
 #         "solve_astrometry": (),
 #         "calculate_pointing_error": (),
-#         "extract": (),
-#         "determine_FWHM": (),
 #         "record": (),
     }
 
