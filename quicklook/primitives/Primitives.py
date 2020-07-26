@@ -1,9 +1,11 @@
 from pathlib import Path
+from datetime import datetime
 
 import numpy as np
 from astropy.io import fits
 from astropy import units as u
 from astropy import stats
+import astropy.coordinates as c
 from astropy.table import Table, Column
 import ccdproc
 import photutils
@@ -72,6 +74,12 @@ class ReadFITS(BasePrimitive):
 
         # Read FITS file
         self.action.args.kd = fits_reader(fitsfile, datatype=VYSOS20)
+
+        # Read some header info
+        rawRA = self.action.args.kd.get('RA')
+        rawDEC = self.action.args.kd.get('DEC')
+        self.action.args.header_pointing = c.SkyCoord(rawRA, rawDEC, frame='fk5',
+                                                      unit=(u.hourangle, u.deg))
 
         return self.action.args
 
@@ -368,10 +376,12 @@ class ExtractStars(BasePrimitive):
         Returns an Argument() with the parameters that depends on this operation.
         """
         self.log.info(f"Running {self.__class__.__name__} action")
-        thresh = self.context.config.instrument['VYSOS20'].getint('extract_threshold', 9)
-        minarea = self.context.config.instrument['VYSOS20'].getint('extract_minarea', 7)
-        mina = self.context.config.instrument['VYSOS20'].getint('fwhm_mina', 1)
-        minb = self.context.config.instrument['VYSOS20'].getint('fwhm_minb', 1)
+        inst_cfg = self.context.config.instrument['VYSOS20']
+        pixel_scale = inst_cfg.getfloat('pixel_scale', 1)
+        thresh = inst_cfg.getint('extract_threshold', 9)
+        minarea = inst_cfg.getint('extract_minarea', 7)
+        mina = inst_cfg.getint('fwhm_mina', 1)
+        minb = inst_cfg.getint('fwhm_minb', 1)
 
         self.action.args.objects = [None] * len(self.action.args.kd.pixeldata)
         self.action.args.fwhm = [None] * len(self.action.args.kd.pixeldata)
@@ -403,15 +413,16 @@ class ExtractStars(BasePrimitive):
             FWHM_pix = np.median(t['FWHM'][~filtered])
             ellipticity = np.median(t['ellipticity'][~filtered])
             self.log.info(f'  FWHM = {FWHM_pix:.1f} pix')
-            self.log.info(f'  ellipticity = {ellipticity:.1f}')
+            self.log.info(f'  FWHM = {FWHM_pix*pixel_scale:.2f} arcsec')
+            self.log.info(f'  ellipticity = {ellipticity:.2f}')
 
-            self.action.args.fwhm[i] = FWHM_pix*u.pix
+            self.action.args.fwhm[i] = FWHM_pix
             self.action.args.ellipticity[i] = ellipticity
 
         return self.action.args
 
 
-class Template(BasePrimitive):
+class Record(BasePrimitive):
     """
     This is a template for primitives, which is usually an action.
 
@@ -456,6 +467,54 @@ class Template(BasePrimitive):
         Returns an Argument() with the parameters that depends on this operation.
         """
         self.log.info(f"Running {self.__class__.__name__} action")
+
+        # Comple image info to store
+        image_info = {'filename': self.action.args.kd.fitsfilename,
+                      'telescope': self.action.args.kd.instrument,
+                      'compressed': Path(self.action.args.kd.fitsfilename).suffix == '.fz',
+                      'target name': self.action.args.kd.get('OBJECT'),
+                      'exptime': float(self.action.args.kd.get('EXPTIME')),
+                      'date': datetime.strptime(self.action.args.kd.get('DATE-OBS'), '%Y-%m-%dT%H:%M:%S'),
+                      'filter': self.action.args.kd.get('FILTER'),
+                      'az': float(self.action.args.kd.get('AZIMUTH')),
+                      'alt': float(self.action.args.kd.get('ALTITUDE')),
+                      'airmass': float(self.action.args.kd.get('AIRMASS')),
+                      'header_RA': self.action.args.header_pointing.ra.deg,
+                      'header_DEC': self.action.args.header_pointing.dec.deg,
+                      'FWHM_pix': np.mean(self.action.args.fwhm),
+                      'ellipticity': np.mean(self.action.args.ellipticity),
+                      'analyzed': True,
+                      'SIDREversion': 'n/a',
+                     }
+        for key in image_info.keys():
+            self.log.debug(f'  {key}: {image_info[key]}')
+
+        import pymongo
+
+        self.log.info('Connecting to mongo db at 192.168.1.101')
+        try:
+            client = pymongo.MongoClient('192.168.1.101', 27017)
+            db = client.vysos
+            images = db['images']
+        except:
+            self.log.error('Could not connect to mongo db')
+            raise Exception('Failed to connect to mongo')
+        else:
+            # Remove old entries for this image file
+            deletion = images.delete_many( {'filename': self.action.args.kd.fitsfilename} )
+            self.log.info(f'  Deleted {deletion.deleted_count} previous entries for {self.action.args.kd.fitsfilename}')
+
+        # Save new entry for this image file
+        self.log.debug('Adding image info to mongo database')
+        ## Save document
+        try:
+            inserted_id = images.insert_one(image_info).inserted_id
+            self.log.info("  Inserted document id: {inserted_id}")
+        except:
+            e = sys.exc_info()[0]
+            self.log.error('Failed to add new document')
+            self.log.error(e)
+        client.close()
 
         return self.action.args
 

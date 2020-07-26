@@ -22,10 +22,10 @@ class QuickLookPipeline(BasePipeline):
         "create_deviation": ("CreateDeviation", "estimating_uncertainty", "make_source_mask"),
         "make_source_mask": ("MakeSourceMask", "making_source_mask", "subtract_background"),
         "subtract_background": ("SubtractBackground", "subtracting_background", "extract"),
-        "extract": ("ExtractStars", "extracting_stars", None),
+        "extract": ("ExtractStars", "extracting_stars", "record"),
 #         "solve_astrometry": (),
 #         "calculate_pointing_error": (),
-#         "record": (),
+        "record": ("Record", "recording_results_in_mongo", None),
     }
 
     def __init__(self, context: ProcessingContext):
