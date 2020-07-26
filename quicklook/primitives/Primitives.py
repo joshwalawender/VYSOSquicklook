@@ -5,6 +5,7 @@ import numpy as np
 from astropy.io import fits
 from astropy import units as u
 from astropy import stats
+from astropy.time import Time
 import astropy.coordinates as c
 from astropy.table import Table, Column
 import ccdproc
@@ -80,6 +81,69 @@ class ReadFITS(BasePrimitive):
         rawDEC = self.action.args.kd.get('DEC')
         self.action.args.header_pointing = c.SkyCoord(rawRA, rawDEC, frame='fk5',
                                                       unit=(u.hourangle, u.deg))
+
+        return self.action.args
+
+
+class MoonInfo(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        """
+        Constructor
+        """
+        BasePrimitive.__init__(self, action, context)
+        # to use the pipeline logger instead of the framework logger, use this:
+        self.log = context.pipeline_logger
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        some_pre_condition = True
+
+        if some_pre_condition:
+            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
+            return True
+        else:
+            return False
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        some_post_condition = True
+
+        if some_post_condition:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
+            return True
+        else:
+            return False
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+
+        inst_cfg = self.context.config.instrument['VYSOS20']
+        header_obstime = self.action.args.kd.get('DATE-OBS')
+        self.obstime = datetime.strptime(header_obstime, '%Y-%m-%dT%H:%M:%S')
+        self.lat = c.Latitude(self.action.args.kd.get('SITELAT'), unit=u.degree)
+        self.lon = c.Longitude(self.action.args.kd.get('SITELONG'), unit=u.degree)
+        self.height = float(self.action.args.kd.get('ALT-OBS')) * u.meter
+        self.loc = c.EarthLocation(self.lon, self.lat, self.height)
+        tmperature = float(self.action.args.kd.get('AMBTEMP'))*u.Celsius
+        press = inst_cfg.getfloat('pressure', 700)*u.mbar
+        self.action.args.altazframe = c.AltAz(location=self.loc, obstime=self.obstime,
+                          temperature=tmperature,
+                          pressure=press)
+        self.action.args.moon = c.get_moon(Time(self.obstime), location=self.loc)
 
         return self.action.args
 
@@ -356,7 +420,7 @@ class ExtractStars(BasePrimitive):
         some_pre_condition = True
 
         if some_pre_condition:
-            self.log.debug("Precondition for ExtractStars is satisfied")
+            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
             return True
         else:
             return False
@@ -366,7 +430,7 @@ class ExtractStars(BasePrimitive):
         some_post_condition = True
 
         if some_post_condition:
-            self.log.debug("Postcondition for ExtractStars is satisfied")
+            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
             return True
         else:
             return False
@@ -490,6 +554,8 @@ class Record(BasePrimitive):
                       'airmass': float(self.action.args.kd.get('AIRMASS')),
                       'header_RA': self.action.args.header_pointing.ra.deg,
                       'header_DEC': self.action.args.header_pointing.dec.deg,
+                      'moon_alt': ((self.action.args.moon.transform_to(self.action.args.altazframe).alt).to(u.degree)).value,
+                      'moon_separation': (self.action.args.moon.separation(self.action.args.header_pointing).to(u.degree)).value,
                       'FWHM_pix': np.mean(self.action.args.fwhm),
                       'ellipticity': np.mean(self.action.args.ellipticity),
                       'analyzed': True,
