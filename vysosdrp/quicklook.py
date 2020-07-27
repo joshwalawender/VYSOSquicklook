@@ -7,7 +7,7 @@ from keckdrpframework.pipelines.base_pipeline import BasePipeline
 from keckdrpframework.models.processing_context import ProcessingContext
 
 # MODIFY THIS IMPORT to reflect the name of the module created in the primitives directory
-from quicklook.primitives.Primitives import *
+from vysosdrp.primitives import *
 
 
 class QuickLookPipeline(BasePipeline):

@@ -21,7 +21,7 @@ conf.read(['setup.cfg'])
 
 
 # MODIFY THE NAME OF THE PACKAGE to be the one chosen
-NAME = 'quicklook'
+NAME = 'vysosdrp'
 VERSION = '1.0dev'
 RELEASE = 'dev' not in VERSION
 
@@ -29,7 +29,7 @@ scripts = []
 
 entry_points = {
     'console_scripts': [
-        "quicklook = quicklook.scripts.script:main"
+        "quicklook = vysosdrp.script:main"
     ]
 }
 
@@ -39,11 +39,11 @@ setup(name=NAME,
       provides=NAME,
       version=VERSION,
       license='BSD3',
-      description='VYSOS quicklook DRP.',
+      description='VYSOS Quick Look DRP.',
       long_description=open('README.txt').read(),
       author='Josh Walawender',
       author_email='jmwalawender@gmail.com',
-      packages=['quicklook',],
+      packages=['vysosdrp',],
       scripts=scripts,
       entry_points=entry_points,
       )

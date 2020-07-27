@@ -12,7 +12,7 @@ import logging.config
 
 # the preferred way to import the pipeline is a direct import
 
-from quicklook.pipelines.quicklook_pipeline import QuickLookPipeline
+from vysosdrp.quicklook import QuickLookPipeline
 
 
 def _parseArguments(in_args):
