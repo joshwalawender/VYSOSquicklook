@@ -703,7 +703,7 @@ class RegeneratePlot(BasePrimitive):
         inst_cfg = self.context.config.instrument['VYSOS20']
         pixel_scale = inst_cfg.getfloat('pixel_scale', 1)
         weather_limits = {'Cloudiness (C)': [-30, -20],
-                          'Wind (kph)': [20, 40],
+                          'Wind (kph)': [20, 70],
                           'Rain': [2400, 2000],
                           }
 
