@@ -107,8 +107,8 @@ def main():
             #framework.append_event('template', arguments)
 
     # ingest an entire directory, trigger "next_file" on each file, optionally continue to monitor if -m is specified
-    elif (len(args.infiles) > 0) or args.dirname is not None:
-        framework.logger.info(f'Ingesting {len(args.infiles)} files from {args.dirname}')
+    elif args.infiles is not None or args.dirname is not None:
+        framework.logger.info(f'Ingesting files from {args.dirname}')
         framework.ingest_data(args.dirname, args.infiles, args.monitor)
 
     framework.start(args.queue_manager_only, args.ingest_data_only, args.wait_for_event, args.continuous)
