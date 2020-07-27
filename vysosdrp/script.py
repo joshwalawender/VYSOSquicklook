@@ -26,6 +26,10 @@ def _parseArguments(in_args):
     # in this case, we are loading an entire directory, and ingesting all the files in that directory
     parser.add_argument('-d', '--directory', dest="dirname", type=str, help="Input directory", nargs='?', default=None)
 
+    parser.add_argument("-O", "--overwrite", dest="overwrite",
+        default=False, action="store_true",
+        help="Reprocess files if they already exist in database?")
+
     args = parser.parse_args(in_args[1:])
     return args
 
@@ -58,6 +62,9 @@ def main():
         pipeline_config = ConfigClass(pipeline_config_fullpath, default_section='DEFAULT')
     else:
         pipeline_config = ConfigClass(args.pipeline_config_file, default_section='DEFAULT')
+
+    if args.overwrite is True:
+        pipeline_config.set('VYSOS20', 'overwrite', value='True')
 
     # END HANDLING OF CONFIGURATION FILES ##########
 

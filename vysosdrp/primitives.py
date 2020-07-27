@@ -144,11 +144,12 @@ class ReadFITS(BasePrimitive):
             self.log.info(f"Could not find file: {fitsfile}")
             return False
 
+        inst_cfg = self.context.config.instrument['VYSOS20']
+
         # Check if this exists in the database already
         already_processed = [d for d in self.images.find( {'filename': fitsfile.name} )]
-        if len(already_processed) == 0:
-            self.action.args.skip = False
-        else:
+        self.action.args.skip = False
+        if len(already_processed) != 0 and inst_cfg.getboolean('overwrite', False) is False:
             self.log.info('File is already in the database, skipping further processing')
             self.action.args.skip = True
             return None
