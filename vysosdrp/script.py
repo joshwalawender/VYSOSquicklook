@@ -35,7 +35,7 @@ def main():
     args = _parseArguments(sys.argv)
 
     # START HANDLING OF CONFIGURATION FILES ##########
-    pkg = 'quicklook'
+    pkg = 'vysosdrp'
 
     # load the framework config file from the config directory of this package
     # this part uses the pkg_resources package to find the full path location
