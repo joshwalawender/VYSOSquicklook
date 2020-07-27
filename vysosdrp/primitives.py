@@ -81,7 +81,9 @@ def query_mongo(db, collection, query):
         result.add_row(insert)
     return result
 
-
+##-----------------------------------------------------------------------------
+## Primitive: ReadFITS
+##-----------------------------------------------------------------------------
 class ReadFITS(BasePrimitive):
     """
     This is a template for primitives, which is usually an action.
@@ -168,6 +170,9 @@ class ReadFITS(BasePrimitive):
         return self.action.args
 
 
+##-----------------------------------------------------------------------------
+## Primitive: MoonInfo
+##-----------------------------------------------------------------------------
 class MoonInfo(BasePrimitive):
     """
     This is a template for primitives, which is usually an action.
@@ -231,6 +236,9 @@ class MoonInfo(BasePrimitive):
         return self.action.args
 
 
+##-----------------------------------------------------------------------------
+## Primitive: GainCorrect
+##-----------------------------------------------------------------------------
 class GainCorrect(BasePrimitive):
     """
     This is a template for primitives, which is usually an action.
@@ -292,6 +300,9 @@ class GainCorrect(BasePrimitive):
         return self.action.args
 
 
+##-----------------------------------------------------------------------------
+## Primitive: CreateDeviation
+##-----------------------------------------------------------------------------
 class CreateDeviation(BasePrimitive):
     """
     This is a template for primitives, which is usually an action.
@@ -365,6 +376,9 @@ class CreateDeviation(BasePrimitive):
         return self.action.args
 
 
+##-----------------------------------------------------------------------------
+## Primitive: MakeSourceMask
+##-----------------------------------------------------------------------------
 class MakeSourceMask(BasePrimitive):
     """
     This is a template for primitives, which is usually an action.
@@ -421,6 +435,9 @@ class MakeSourceMask(BasePrimitive):
         return self.action.args
 
 
+##-----------------------------------------------------------------------------
+## Primitive: SubtractBackground
+##-----------------------------------------------------------------------------
 class SubtractBackground(BasePrimitive):
     """
     This is a template for primitives, which is usually an action.
@@ -478,6 +495,9 @@ class SubtractBackground(BasePrimitive):
         return self.action.args
 
 
+##-----------------------------------------------------------------------------
+## Primitive: ExtractStars
+##-----------------------------------------------------------------------------
 class ExtractStars(BasePrimitive):
     """
     This is a template for primitives, which is usually an action.
@@ -569,6 +589,9 @@ class ExtractStars(BasePrimitive):
         return self.action.args
 
 
+##-----------------------------------------------------------------------------
+## Primitive: Record
+##-----------------------------------------------------------------------------
 class Record(BasePrimitive):
     """
     This is a template for primitives, which is usually an action.
@@ -666,6 +689,9 @@ class Record(BasePrimitive):
         return self.action.args
 
 
+##-----------------------------------------------------------------------------
+## Primitive: RegeneratePlot
+##-----------------------------------------------------------------------------
 class RegeneratePlot(BasePrimitive):
     """
     This is a template for primitives, which is usually an action.
