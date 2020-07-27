@@ -106,6 +106,16 @@ class ReadFITS(BasePrimitive):
         """Check for conditions necessary to run this process"""
         some_pre_condition = True
 
+        try:
+            import pymongo
+            self.log.debug('Connecting to mongo db at 192.168.1.101')
+            self.mongoclient = pymongo.MongoClient('192.168.1.101', 27017)
+            self.images = self.mongoclient.vysos['images']
+            self.mongoclient.close()
+        except:
+            self.log.error('Could not connect to mongo db')
+            some_pre_condition = False
+
         if some_pre_condition:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
             return True
@@ -133,6 +143,15 @@ class ReadFITS(BasePrimitive):
         else:
             self.log.info(f"Could not find file: {fitsfile}")
             return False
+
+        # Check if this exists in the database already
+        already_processed = [d for d in self.images.find( {'filename': fitsfile.name} )]
+        if len(already_processed) == 0:
+            self.action.args.skip = False
+        else:
+            self.log.info('File is already in the database, skipping further processing')
+            self.action.args.skip = True
+            return None
 
         # Read FITS file
         self.action.args.kd = fits_reader(fitsfile, datatype=VYSOS20)
@@ -170,7 +189,7 @@ class MoonInfo(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = True
+        some_pre_condition = not self.action.args.skip
 
         if some_pre_condition:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
@@ -233,7 +252,7 @@ class GainCorrect(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = True
+        some_pre_condition = not self.action.args.skip
 
         if some_pre_condition:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
@@ -294,7 +313,7 @@ class CreateDeviation(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = True
+        some_pre_condition = not self.action.args.skip
 
         if some_pre_condition:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
@@ -369,7 +388,7 @@ class MakeSourceMask(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = True
+        some_pre_condition = not self.action.args.skip
 
         if some_pre_condition:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
@@ -423,7 +442,7 @@ class SubtractBackground(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = True
+        some_pre_condition = not self.action.args.skip
 
         if some_pre_condition:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
@@ -480,7 +499,7 @@ class ExtractStars(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = True
+        some_pre_condition = not self.action.args.skip
 
         if some_pre_condition:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
@@ -571,11 +590,11 @@ class Record(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = True
+        some_pre_condition = not self.action.args.skip
 
         try:
             import pymongo
-            self.log.info('Connecting to mongo db at 192.168.1.101')
+            self.log.debug('Connecting to mongo db at 192.168.1.101')
             self.mongoclient = pymongo.MongoClient('192.168.1.101', 27017)
             self.images = self.mongoclient.vysos['images']
         except:
@@ -668,11 +687,11 @@ class RegeneratePlot(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = True
+        some_pre_condition = not self.action.args.skip
 
         try:
             import pymongo
-            self.log.info('Connecting to mongo db at 192.168.1.101')
+            self.log.debug('Connecting to mongo db at 192.168.1.101')
             self.mongoclient = pymongo.MongoClient('192.168.1.101', 27017)
             self.db = self.mongoclient['vysos']
         except:
@@ -1054,7 +1073,7 @@ class Template(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = True
+        some_pre_condition = not self.action.args.skip
 
         if some_pre_condition:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
