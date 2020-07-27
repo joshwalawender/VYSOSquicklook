@@ -29,7 +29,8 @@ scripts = []
 
 entry_points = {
     'console_scripts': [
-        "quicklook = vysosdrp.script:main"
+        "analyzeone = vysosdrp.script:analyze_one",
+        "watchdirectory = vysosdrp.script:watch_directory",
     ]
 }
 

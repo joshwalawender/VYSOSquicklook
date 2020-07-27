@@ -9,53 +9,36 @@ import sys
 import traceback
 import pkg_resources
 import logging.config
-
-# the preferred way to import the pipeline is a direct import
+from pathlib import Path
 
 from vysosdrp.quicklook import QuickLookPipeline
 
 
 def _parseArguments(in_args):
-    description = "Template pipeline CLI"
-
-    # this is a simple case where we provide a frame and a configuration file
-    parser = argparse.ArgumentParser(prog=f"{in_args[0]}", description=description)
-    parser.add_argument('-c', dest="config_file", type=str, help="Configuration file")
-    parser.add_argument('-frames', nargs='*', type=str, help='input image file (full path, list ok)', default=None)
-
-    # in this case, we are loading an entire directory, and ingesting all the files in that directory
-    parser.add_argument('-d', '--directory', dest="dirname", type=str, help="Input directory", nargs='?', default=None)
-
+    parser = argparse.ArgumentParser(prog=f"{in_args[0]}",
+                      description='')
+    parser.add_argument('-c', dest="config_file", type=str,
+           help="Configuration file")
     parser.add_argument("-O", "--overwrite", dest="overwrite",
-        default=False, action="store_true",
-        help="Reprocess files if they already exist in database?")
-
+           default=False, action="store_true",
+           help="Reprocess files if they already exist in database?")
+    parser.add_argument('input', type=str,
+           help="input image file (full path)", default=None)
     args = parser.parse_args(in_args[1:])
+
     return args
 
 
-def main():
-
-    args = _parseArguments(sys.argv)
-
+def setup_framework(args):
     # START HANDLING OF CONFIGURATION FILES ##########
     pkg = 'vysosdrp'
-
-    # load the framework config file from the config directory of this package
-    # this part uses the pkg_resources package to find the full path location
-    # of framework.cfg
     framework_config_file = "framework.cfg"
     framework_config_fullpath = pkg_resources.resource_filename(pkg, framework_config_file)
 
-    # load the logger config file from the config directory of this package
-    # this part uses the pkg_resources package to find the full path location
-    # of logger.cfg
     framework_logcfg_file = 'logger.cfg'
     framework_logcfg_fullpath = pkg_resources.resource_filename(pkg, framework_logcfg_file)
 
     # add PIPELINE specific config files
-    # this part uses the pkg_resource package to find the full path location
-    # of template.cfg or uses the one defines in the command line with the option -c
     if args.config_file is None:
         pipeline_config_file = 'pipeline.cfg'
         pipeline_config_fullpath = pkg_resources.resource_filename(pkg, pipeline_config_file)
@@ -77,27 +60,46 @@ def main():
         traceback.print_exc()
         sys.exit(1)
 
-    # this part defines a specific logger for the pipeline, so that
-    # we can separate the output of the pipeline
-    # from the output of the framework
+    # this part defines a specific logger for the pipeline, so that we can
+    # separate the output of the pipeline from the output of the framework
     framework.context.pipeline_logger = getLogger(framework_logcfg_fullpath, name="pipeline")
     framework.logger = getLogger(framework_logcfg_fullpath, name="DRPF")
-
     framework.logger.info("Framework initialized")
 
-    # frames processing
-    if args.frames is not None:
-        for frame in args.frames:
-            # ingesting and triggering the default ingestion event specified in the configuration file
-            framework.ingest_data(None, args.frames, False)
+    return framework
 
-    # ingest an entire directory, trigger "next_file" on each file, optionally continue to monitor if -m is specified
-    elif args.dirname is not None:
-        framework.logger.info(f'Ingesting files from {args.dirname}')
-        framework.ingest_data(args.dirname, None, True)
 
-    framework.start(False, False, False, args.dirname is not None)
+def analyze_one():
+    args = _parseArguments(sys.argv)
+    framework = setup_framework(args)
+
+    if args.input is not None:
+        p = Path(args.input).expanduser()
+        args.input = str(p)
+        if p.exists() is False:
+            framework.context.pipeline_logger.error(f'Could not find file: {args.input}')
+        else:
+            if p.is_file() is True:
+                framework.context.pipeline_logger.info(f'Found file: {args.input}')
+            elif p.is_dir() is True:
+                framework.context.pipeline_logger.info(f'Found directory: {args.input}')
+
+
+    framework.logger.info(f"Processing single file: {args.input}")
+    framework.ingest_data(None, [args.input], False)
+    framework.start(False, False, False, False)
+
+
+def watch_directory():
+    args = _parseArguments(sys.argv)
+    framework = setup_framework(args)
+    framework.logger.info(f'Ingesting files from {args.input}')
+    framework.ingest_data(args.input, None, True)
+    framework.start(False, False, False, True)
+
+
+main = analyze_one
 
 
 if __name__ == "__main__":
-    main()
+    analyze_one()
