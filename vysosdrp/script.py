@@ -40,20 +40,20 @@ def main():
     # load the framework config file from the config directory of this package
     # this part uses the pkg_resources package to find the full path location
     # of framework.cfg
-    framework_config_file = "configs/framework.cfg"
+    framework_config_file = "framework.cfg"
     framework_config_fullpath = pkg_resources.resource_filename(pkg, framework_config_file)
 
     # load the logger config file from the config directory of this package
     # this part uses the pkg_resources package to find the full path location
     # of logger.cfg
-    framework_logcfg_file = 'configs/logger.cfg'
+    framework_logcfg_file = 'logger.cfg'
     framework_logcfg_fullpath = pkg_resources.resource_filename(pkg, framework_logcfg_file)
 
     # add PIPELINE specific config files
     # this part uses the pkg_resource package to find the full path location
     # of template.cfg or uses the one defines in the command line with the option -c
     if args.config_file is None:
-        pipeline_config_file = 'configs/pipeline.cfg'
+        pipeline_config_file = 'pipeline.cfg'
         pipeline_config_fullpath = pkg_resources.resource_filename(pkg, pipeline_config_file)
         pipeline_config = ConfigClass(pipeline_config_fullpath, default_section='DEFAULT')
     else:
