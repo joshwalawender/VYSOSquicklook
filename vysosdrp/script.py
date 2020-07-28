@@ -11,7 +11,7 @@ import pkg_resources
 import logging.config
 from pathlib import Path
 
-from vysosdrp.quicklook import QuickLookPipeline, GeneratePlotOnly
+from vysosdrp.pipelines import QuickLookPipeline, GeneratePlotOnly
 
 
 def _parseArguments(in_args):
