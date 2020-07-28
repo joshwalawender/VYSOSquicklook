@@ -51,6 +51,8 @@ def setup_framework(args, pipeline=QuickLookPipeline):
 
     if args.overwrite is True:
         pipeline_config.set('VYSOS20', 'overwrite', value='True')
+    if args.norecord is True:
+        pipeline_config.set('VYSOS20', 'norecord', value='True')
 
     # END HANDLING OF CONFIGURATION FILES ##########
 

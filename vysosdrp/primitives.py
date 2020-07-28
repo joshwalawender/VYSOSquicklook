@@ -552,7 +552,8 @@ class Record(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = not self.action.args.skip and not self.action.args.norecord
+        inst_cfg = self.context.config.instrument['VYSOS20']
+        some_pre_condition = (not self.action.args.skip) and (not inst_cfg.getboolean('norecord', False))
 
         try:
             import pymongo
