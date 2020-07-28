@@ -552,7 +552,7 @@ class Record(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = not self.action.args.skip and not self.action.args.skip.norecord
+        some_pre_condition = not self.action.args.skip and not self.action.args.norecord
 
         try:
             import pymongo
