@@ -24,8 +24,8 @@ class QuickLookPipeline(BasePipeline):
         "make_source_mask": ("MakeSourceMask", "making_source_mask", "subtract_background"),
         "subtract_background": ("SubtractBackground", "subtracting_background", "extract"),
         "extract": ("ExtractStars", "extracting_stars", "record"),
-        "record": ("Record", "recording_results_in_mongo", "regenerate_plot"),
-        "regenerate_plot": ("RegeneratePlot", "generating_plot", None),
+        "record": ("Record", "recording_results_in_mongo", None),
+#         "regenerate_plot": ("RegeneratePlot", "generating_plot", None),
 #         "transfer_file": (),
     }
 
