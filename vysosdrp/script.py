@@ -11,7 +11,7 @@ import pkg_resources
 import logging.config
 from pathlib import Path
 
-from vysosdrp.quicklook import QuickLookPipeline
+from vysosdrp.quicklook import QuickLookPipeline, GeneratePlotOnly
 
 
 def _parseArguments(in_args):
@@ -22,14 +22,17 @@ def _parseArguments(in_args):
     parser.add_argument("-O", "--overwrite", dest="overwrite",
            default=False, action="store_true",
            help="Reprocess files if they already exist in database?")
+    parser.add_argument("--norecord", dest="norecord",
+           default=False, action="store_true",
+           help="Skip recording results to mongo DB?")
     parser.add_argument('input', type=str,
-           help="input image file (full path)", default=None)
+           help="input image file (full path)", default='.')
     args = parser.parse_args(in_args[1:])
 
     return args
 
 
-def setup_framework(args):
+def setup_framework(args, pipeline=QuickLookPipeline):
     # START HANDLING OF CONFIGURATION FILES ##########
     pkg = 'vysosdrp'
     framework_config_file = "framework.cfg"
@@ -98,7 +101,12 @@ def watch_directory():
     framework.start(False, False, False, True)
 
 
-main = analyze_one
+def generate_plot():
+    args = _parseArguments(sys.argv)
+    framework = setup_framework(args, pipeline=GeneratePlotOnly)
+    framework.logger.info(f"Processing plot")
+    framework.ingest_data(None, args.input, False)
+    framework.start(False, False, False, False)
 
 
 if __name__ == "__main__":

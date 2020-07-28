@@ -34,3 +34,21 @@ class QuickLookPipeline(BasePipeline):
         Constructor
         """
         BasePipeline.__init__(self, context)
+
+
+class GeneratePlotOnly(BasePipeline):
+    """
+    The template pipeline.
+    """
+
+    # modify the event table to use the events actually defined in the primitives
+    event_table = {
+        "next_file": ("ReadFITS", "file_ingested", "regenerate_plot"),
+        "regenerate_plot": ("RegeneratePlot", "generating_plot", None),
+    }
+
+    def __init__(self, context: ProcessingContext):
+        """
+        Constructor
+        """
+        BasePipeline.__init__(self, context)
