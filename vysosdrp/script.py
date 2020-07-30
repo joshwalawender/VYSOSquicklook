@@ -26,8 +26,8 @@ def _parseArguments(in_args):
     parser.add_argument("--norecord", dest="norecord",
            default=False, action="store_true",
            help="Skip recording results to mongo DB?")
-    parser.add_argument('input', type=str,
-           help="input image file (full path)", default='.')
+    parser.add_argument('input', type=str, nargs='?',
+           help="input image file (full path)", default='')
     args = parser.parse_args(in_args[1:])
 
     return args
@@ -77,9 +77,8 @@ def setup_framework(args, pipeline=QuickLookPipeline):
 
 def analyze_one():
     args = _parseArguments(sys.argv)
-    framework = setup_framework(args)
 
-    if args.input is not None:
+    if args.input is not '':
         p = Path(args.input).expanduser()
         args.input = str(p)
         if p.exists() is False:
@@ -90,6 +89,7 @@ def analyze_one():
             elif p.is_dir() is True:
                 framework.context.pipeline_logger.info(f'Found directory: {args.input}')
 
+    framework = setup_framework(args)
     framework.logger.info(f"Processing single file: {args.input}")
     framework.ingest_data(None, [args.input], False)
     framework.start(False, False, False, False)
@@ -97,13 +97,12 @@ def analyze_one():
 
 def watch_directory():
     args = _parseArguments(sys.argv)
-    framework = setup_framework(args)
 
-    if args.input is not None:
+    if args.input is not '':
         p = Path(args.input).expanduser()
         args.input = str(p)
         if p.exists() is False:
-            framework.context.pipeline_logger.error(f'Could not find file: {args.input}')
+            framework.context.pipeline_logger.error(f'Could not find: {args.input}')
         else:
             if p.is_file() is True:
                 framework.context.pipeline_logger.info(f'Found file: {args.input}')
@@ -114,8 +113,9 @@ def watch_directory():
         p = Path(f'~/V20Data/Images/{date_string}').expanduser()
         if p.exists() is False:
             p.mkdir(parents=True, exist_ok=True)
-        args.directory = str(p)
+        args.input = str(p)
 
+    framework = setup_framework(args)
     framework.logger.info(f'Ingesting files from {args.input}')
     framework.ingest_data(args.input, None, True)
     framework.start(False, False, False, True)
