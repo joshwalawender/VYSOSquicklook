@@ -80,9 +80,9 @@ class ReadFITS(BasePrimitive):
         self.log.info(f"Running {self.__class__.__name__} action")
         fitsfile = Path(self.action.args.name).expanduser()
         if fitsfile.exists():
-            self.log.info(f"File: {fitsfile}")
+            self.log.info(f"  File: {fitsfile}")
         else:
-            self.log.info(f"Could not find file: {fitsfile}")
+            self.log.info(f"  Could not find file: {fitsfile}")
             return False
 
         inst_cfg = self.context.config.instrument['VYSOS20']
@@ -91,7 +91,7 @@ class ReadFITS(BasePrimitive):
         already_processed = [d for d in self.images.find( {'filename': fitsfile.name} )]
         self.action.args.skip = False
         if len(already_processed) != 0 and inst_cfg.getboolean('overwrite', False) is False:
-            self.log.info('File is already in the database, skipping further processing')
+            self.log.info('  File is already in the database, skipping further processing')
             self.action.args.skip = True
 
         # Read FITS file
@@ -299,7 +299,6 @@ class CreateDeviation(BasePrimitive):
             self.action.args.kd.headers.append(fits.Header( {'READNOISE': rn} ))
 
         for i,pd in enumerate(self.action.args.kd.pixeldata):
-            self.log.info('Estimating uncertainty in pixeldata')
             if pd.unit == u.electron:
                 self.action.args.kd.pixeldata[i] = ccdproc.create_deviation(pd,
                                    readnoise=rn*u.electron)
@@ -511,14 +510,12 @@ class ExtractStars(BasePrimitive):
 
             self.action.args.objects[i] = t
 
-            self.log.info('  Determining typical FWHM')        
             filtered = (t['a'] < mina) | (t['b'] < minb) | (t['flag'] > 0)
             self.log.debug(f'  Removing {np.sum(filtered):d}/{len(filtered):d}'\
                           f' extractions from FWHM calculation')
             FWHM_pix = np.median(t['FWHM'][~filtered])
             ellipticity = np.median(t['ellipticity'][~filtered])
-            self.log.info(f'  FWHM = {FWHM_pix:.1f} pix')
-            self.log.info(f'  FWHM = {FWHM_pix*pixel_scale:.2f} arcsec')
+            self.log.info(f'  MEdian FWHM = {FWHM_pix:.1f} pix ({FWHM_pix*pixel_scale:.2f} arcsec)')
             self.log.info(f'  ellipticity = {ellipticity:.2f}')
 
             self.action.args.fwhm[i] = FWHM_pix
