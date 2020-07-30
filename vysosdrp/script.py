@@ -10,6 +10,7 @@ import traceback
 import pkg_resources
 import logging.config
 from pathlib import Path
+from datetime import datetime
 
 from vysosdrp.pipelines import QuickLookPipeline, GeneratePlotOnly
 
@@ -89,7 +90,6 @@ def analyze_one():
             elif p.is_dir() is True:
                 framework.context.pipeline_logger.info(f'Found directory: {args.input}')
 
-
     framework.logger.info(f"Processing single file: {args.input}")
     framework.ingest_data(None, [args.input], False)
     framework.start(False, False, False, False)
@@ -98,6 +98,24 @@ def analyze_one():
 def watch_directory():
     args = _parseArguments(sys.argv)
     framework = setup_framework(args)
+
+    if args.input is not None:
+        p = Path(args.input).expanduser()
+        args.input = str(p)
+        if p.exists() is False:
+            framework.context.pipeline_logger.error(f'Could not find file: {args.input}')
+        else:
+            if p.is_file() is True:
+                framework.context.pipeline_logger.info(f'Found file: {args.input}')
+            elif p.is_dir() is True:
+                framework.context.pipeline_logger.info(f'Found directory: {args.input}')
+    else:
+        date_string = datetime.utcnow().strftime('%Y%m%dUT')
+        p = Path(f'~/V20Data/Images/{date_string}').expanduser()
+        if p.exists() is False:
+            p.mkdir(parents=True, exist_ok=True)
+        args.directory = str(p)
+
     framework.logger.info(f'Ingesting files from {args.input}')
     framework.ingest_data(args.input, None, True)
     framework.start(False, False, False, True)
