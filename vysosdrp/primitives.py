@@ -608,14 +608,14 @@ class Record(BasePrimitive):
 
         # Remove old entries for this image file
         deletion = self.images.delete_many( {'filename': self.action.args.kd.fitsfilename} )
-        self.log.info(f'  Deleted {deletion.deleted_count} previous entries for {self.action.args.kd.fitsfilename}')
+        self.log.debug(f'  Deleted {deletion.deleted_count} previous entries for {self.action.args.kd.fitsfilename}')
 
         # Save new entry for this image file
         self.log.debug('Adding image info to mongo database')
         ## Save document
         try:
             inserted_id = self.images.insert_one(image_info).inserted_id
-            self.log.info(f"  Inserted document id: {inserted_id}")
+            self.log.debug(f"  Inserted document id: {inserted_id}")
         except:
             e = sys.exc_info()[0]
             self.log.error('Failed to add new document')
