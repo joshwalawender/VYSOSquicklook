@@ -515,7 +515,7 @@ class ExtractStars(BasePrimitive):
                           f' extractions from FWHM calculation')
             FWHM_pix = np.median(t['FWHM'][~filtered])
             ellipticity = np.median(t['ellipticity'][~filtered])
-            self.log.info(f'  MEdian FWHM = {FWHM_pix:.1f} pix ({FWHM_pix*pixel_scale:.2f} arcsec)')
+            self.log.info(f'  Median FWHM = {FWHM_pix:.1f} pix ({FWHM_pix*pixel_scale:.2f} arcsec)')
             self.log.info(f'  ellipticity = {ellipticity:.2f}')
 
             self.action.args.fwhm[i] = FWHM_pix
