@@ -97,6 +97,7 @@ def analyze_one():
 
 def watch_directory():
     args = _parseArguments(sys.argv)
+    framework = setup_framework(args)
 
     if args.input is not '':
         p = Path(args.input).expanduser()
@@ -115,7 +116,6 @@ def watch_directory():
             p.mkdir(parents=True, exist_ok=True)
         args.input = str(p)
 
-    framework = setup_framework(args)
     framework.logger.info(f'Ingesting files from {args.input}')
     framework.ingest_data(args.input, None, True)
     framework.start(False, False, False, True)
