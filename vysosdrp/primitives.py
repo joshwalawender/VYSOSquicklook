@@ -92,7 +92,7 @@ class ReadFITS(BasePrimitive):
         if fitsfile.suffix == '.fz':
             fitsfile_db = '.'.join(fitsfile.name.split('.')[:-1])
         else:
-            fitsfile_db = filtsfile
+            fitsfile_db = fitsfile.name
 
         # Check if this exists in the database already
         already_processed = [d for d in self.images.find( {'filename': fitsfile_db} )]
