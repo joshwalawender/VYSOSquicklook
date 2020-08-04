@@ -87,8 +87,15 @@ class ReadFITS(BasePrimitive):
 
         inst_cfg = self.context.config.instrument['VYSOS20']
 
+        # If we are reading a compressed file, use the uncompressed version of
+        # the name for the database
+        if fitsfile.suffix == '.fz':
+            fitsfile_db = '.'.join(fitsfile.name.split('.')[:-1])
+        else:
+            fitsfile_db = filtsfile
+
         # Check if this exists in the database already
-        already_processed = [d for d in self.images.find( {'filename': fitsfile.name} )]
+        already_processed = [d for d in self.images.find( {'filename': fitsfile_db} )]
         self.action.args.skip = False
         if len(already_processed) != 0 and inst_cfg.getboolean('overwrite', False) is False:
             self.log.info('  File is already in the database, skipping further processing')
@@ -96,6 +103,11 @@ class ReadFITS(BasePrimitive):
 
         # Read FITS file
         self.action.args.kd = fits_reader(fitsfile, datatype=VYSOS20)
+
+        # If we are reading a compressed file, use the uncompressed version of
+        # the name for the database
+        if fitsfile.suffix == '.fz':
+            self.action.args.kd.fitsfile = fitsfile_db
 
         # Read some header info
         self.action.args.obstime = datetime.strptime(self.action.args.kd.get('DATE-OBS'), '%Y-%m-%dT%H:%M:%S')

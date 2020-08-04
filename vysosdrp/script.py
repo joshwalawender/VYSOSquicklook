@@ -11,6 +11,7 @@ import pkg_resources
 import logging.config
 from pathlib import Path
 from datetime import datetime
+from glob import glob
 
 from vysosdrp.pipelines import QuickLookPipeline, GeneratePlotOnly
 
@@ -77,6 +78,7 @@ def setup_framework(args, pipeline=QuickLookPipeline):
 
 def analyze_one():
     args = _parseArguments(sys.argv)
+    framework = setup_framework(args)
 
     if args.input is not '':
         p = Path(args.input).expanduser()
@@ -84,12 +86,18 @@ def analyze_one():
         if p.exists() is False:
             framework.context.pipeline_logger.error(f'Could not find file: {args.input}')
         else:
+            base_path = [x for x in p.parents][-3]
+            if base_path == Path('/Users/vysosuser'):
+                pass
+            elif base_path == Path('/Volumes/VYSOSData'):
+                framework.context.pipeline_logger.info(f'Setting file_type to *.fz')
+                framework.config['DEFAULT']['file_type'] = '*.fz'
+
             if p.is_file() is True:
                 framework.context.pipeline_logger.info(f'Found file: {args.input}')
             elif p.is_dir() is True:
                 framework.context.pipeline_logger.info(f'Found directory: {args.input}')
 
-    framework = setup_framework(args)
     framework.logger.info(f"Processing single file: {args.input}")
     framework.ingest_data(None, [args.input], False)
     framework.start(False, False, False, False)
@@ -105,6 +113,13 @@ def watch_directory():
         if p.exists() is False:
             framework.context.pipeline_logger.error(f'Could not find: {args.input}')
         else:
+            base_path = [x for x in p.parents][-3]
+            if base_path == Path('/Users/vysosuser'):
+                pass
+            elif base_path == Path('/Volumes/VYSOSData'):
+                framework.context.pipeline_logger.info(f'Setting file_type to *.fz')
+                framework.config['DEFAULT']['file_type'] = '*.fz'
+
             if p.is_file() is True:
                 framework.context.pipeline_logger.info(f'Found file: {args.input}')
             elif p.is_dir() is True:
@@ -117,7 +132,8 @@ def watch_directory():
         args.input = str(p)
 
     framework.logger.info(f'Ingesting files from {args.input}')
-    framework.ingest_data(args.input, None, True)
+    infiles = glob(f"{args.input}/{framework.config['DEFAULT']['file_type']}")
+    framework.ingest_data(args.input, infiles, True)
     framework.start(False, False, False, True)
 
 
