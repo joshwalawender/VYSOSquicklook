@@ -184,6 +184,9 @@ class MoonInfo(BasePrimitive):
 
         self.action.args.sun = c.get_sun(Time(self.action.args.obstime))
 
+        self.action.args.moon_alt = ((self.action.args.moon.transform_to(self.action.args.altazframe).alt).to(u.degree)).value
+        self.action.args.moon_separation = (self.action.args.moon.separation(self.action.args.header_pointing).to(u.degree)).value
+
         # Moon illumination formula from Meeus, “Astronomical 
         # Algorithms". Formulae 46.1 and 46.2 in the 1991 edition, 
         # using the approximation cos(psi) \approx -cos(i). Error 
