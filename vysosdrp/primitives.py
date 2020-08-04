@@ -183,6 +183,20 @@ class MoonInfo(BasePrimitive):
         self.action.args.moon = c.get_moon(Time(self.action.args.obstime),
                                            location=self.loc)
 
+        self.action.args.sun = c.get_sun(Time(self.action.args.obstime))
+
+        # Moon illumination formula from Meeus, “Astronomical 
+        # Algorithms". Formulae 46.1 and 46.2 in the 1991 edition, 
+        # using the approximation cos(psi) \approx -cos(i). Error 
+        # should be no more than 0.0014 (p. 316). 
+        dec_sun = self.action.args.sun.dec.radian
+        dec_moon = self.action.args.moon.dec.radian
+        ra_sun = self.action.args.sun.ra.radian
+        ra_moon = self.action.args.moon.ra.radian
+        self.action.args.moon_illum = 50*(1 - np.sin(dec_sun)*np.sin(dec_moon)\
+                                      - np.cos(dec_sun)*np.cos(dec_moon)\
+                                      * np.cos(ra_sun-ra_moon))
+
         return self.action.args
 
 
@@ -610,6 +624,7 @@ class Record(BasePrimitive):
                       'header_DEC': self.action.args.header_pointing.dec.deg,
                       'moon_alt': ((self.action.args.moon.transform_to(self.action.args.altazframe).alt).to(u.degree)).value,
                       'moon_separation': (self.action.args.moon.separation(self.action.args.header_pointing).to(u.degree)).value,
+                      'moon_illumination': self.action.args.moon_illum,
                       'FWHM_pix': np.mean(self.action.args.fwhm),
                       'ellipticity': np.mean(self.action.args.ellipticity),
                       'analyzed': True,
