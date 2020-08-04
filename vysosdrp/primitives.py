@@ -106,8 +106,7 @@ class ReadFITS(BasePrimitive):
 
         # If we are reading a compressed file, use the uncompressed version of
         # the name for the database
-        if fitsfile.suffix == '.fz':
-            self.action.args.kd.fitsfile = fitsfile_db
+        self.action.args.kd.fitsfile = fitsfile_db
 
         # Read some header info
         self.action.args.obstime = datetime.strptime(self.action.args.kd.get('DATE-OBS'), '%Y-%m-%dT%H:%M:%S')
@@ -610,7 +609,7 @@ class Record(BasePrimitive):
         self.log.info(f"Running {self.__class__.__name__} action")
 
         # Comple image info to store
-        image_info = {'filename': self.action.args.kd.fitsfilename,
+        image_info = {'filename': self.action.args.kd.fitsfile,
                       'telescope': self.action.args.kd.instrument,
                       'compressed': Path(self.action.args.kd.fitsfilename).suffix == '.fz',
                       'target name': self.action.args.kd.get('OBJECT'),
