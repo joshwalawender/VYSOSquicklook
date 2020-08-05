@@ -2,6 +2,8 @@ from keckdrpframework.core.framework import Framework
 from keckdrpframework.config.framework_config import ConfigClass
 from keckdrpframework.models.arguments import Arguments
 from keckdrpframework.utils.drpf_logger import getLogger
+from keckdrpframework.tools.interface import FrameworkInterface, Arguments, Event, Framework, ConfigClass
+from keckdrpframework.core import queues
 import subprocess
 import time
 import argparse
@@ -13,7 +15,7 @@ from pathlib import Path
 from datetime import datetime
 from glob import glob
 
-from vysosdrp.pipelines import QuickLookPipeline, GeneratePlotOnly
+from vysosdrp.pipelines import QuickLookPipeline
 
 
 def _parseArguments(in_args):
@@ -143,6 +145,21 @@ def generate_plot():
     framework.logger.info(f"Processing plot")
     framework.ingest_data(None, args.input, False)
     framework.start(False, False, False, False)
+
+
+def change_directory():
+    framework_config_fullpath = pkg_resources.resource_filename("vysosdrp", "framework.cfg")
+    cfg = ConfigClass(framework_config_fullpath)
+    queue = queues.get_event_queue(cfg.queue_manager_hostname,
+                                   cfg.queue_manager_portnr,
+                                   cfg.queue_manager_auth_code)
+    if queue is None:
+        print("Failed to connect to Queue Manager")
+    else:
+        pending = queue.get_pending()
+        print(pending)
+        event = Event("update_directory", Arguments())
+        queue.put(event)
 
 
 if __name__ == "__main__":

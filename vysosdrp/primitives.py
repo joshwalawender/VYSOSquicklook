@@ -17,8 +17,6 @@ from keckdata import fits_reader, VYSOS20
 from keckdrpframework.primitives.base_primitive import BasePrimitive
 from keckdrpframework.models.arguments import Arguments
 
-from .vysos_plotting import query_mongo, get_sunrise_sunset, make_nightly_plot
-
 
 ##-----------------------------------------------------------------------------
 ## Primitive: ReadFITS
@@ -593,6 +591,7 @@ class Record(BasePrimitive):
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
             return True
         else:
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
             return False
 
     def _post_condition(self):
@@ -654,10 +653,7 @@ class Record(BasePrimitive):
         return self.action.args
 
 
-##-----------------------------------------------------------------------------
-## Primitive: RegeneratePlot
-##-----------------------------------------------------------------------------
-class RegeneratePlot(BasePrimitive):
+class UpdateDirectory(BasePrimitive):
     """
     This is a template for primitives, which is usually an action.
 
@@ -685,6 +681,7 @@ class RegeneratePlot(BasePrimitive):
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
             return True
         else:
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
             return False
 
     def _post_condition(self):
@@ -695,6 +692,7 @@ class RegeneratePlot(BasePrimitive):
             self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
             return True
         else:
+            self.log.warning(f"Postcondition for {self.__class__.__name__} failed")
             return False
 
     def _perform(self):
@@ -702,26 +700,16 @@ class RegeneratePlot(BasePrimitive):
         Returns an Argument() with the parameters that depends on this operation.
         """
         self.log.info(f"Running {self.__class__.__name__} action")
-        inst_cfg = self.context.config.instrument['VYSOS20']
-        pixel_scale = inst_cfg.getfloat('pixel_scale', 1)
 
-        if hasattr(self.action.args, 'obstime') is True:
-            date_string = self.action.args.obstime.strftime('%Y%m%dUT')
-        else:
-            date_string = datetime.utcnow().strftime('%Y%m%dUT')
+        # Set to today's UT date
+        date_string = datetime.utcnow().strftime('%Y%m%dUT')
+        newdir = Path(f'~/V20Data/Images/{date_string}').expanduser()
+        self.log.info(f"  Updating directory to {newdir}")
 
-        make_nightly_plot(date_string=date_string,
-                          instrument=self.action.args.kd.instrument, 
-                          log=self.log,
-                          pixel_scale=pixel_scale)
+        self.context.data_set.remove_all()
+        self.context.data_set.change_directory(f"{newdir}")
 
         return self.action.args
-
-
-
-
-
-
 
 
 # class Template(BasePrimitive):
