@@ -710,6 +710,9 @@ class UpdateDirectory(BasePrimitive):
         # Set to today's UT date
         date_string = datetime.utcnow().strftime('%Y%m%dUT')
         newdir = Path(f'~/V20Data/Images/{date_string}').expanduser()
+        if newdir.exists() is False:
+            self.log.info(f"  Creating directory {newdir}")
+            newdir.mkdir(parents=True)
         self.log.info(f"  Updating directory to {newdir}")
 
         self.context.data_set.remove_all()
