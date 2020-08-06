@@ -1,5 +1,6 @@
 from pathlib import Path
 from datetime import datetime, timedelta
+import sys
 
 import numpy as np
 from astropy.io import fits
@@ -513,39 +514,43 @@ class ExtractStars(BasePrimitive):
         mina = inst_cfg.getint('fwhm_mina', 1)
         minb = inst_cfg.getint('fwhm_minb', 1)
 
-        self.action.args.objects = [None] * len(self.action.args.kd.pixeldata)
-        self.action.args.fwhm = [None] * len(self.action.args.kd.pixeldata)
-        self.action.args.ellipticity = [None] * len(self.action.args.kd.pixeldata)
-        for i,pd in enumerate(self.action.args.kd.pixeldata):
-            objects = sep.extract(pd.data, err=pd.uncertainty.array,
-                                  mask=pd.mask,
-                                  thresh=float(thresh), minarea=minarea)
-            t = Table(objects)
-            self.log.info(f'  Found {len(t):d} sources in extension {i}')
+        self.action.args.fwhm = np.nan
+        self.action.args.ellipticity = np.nan
 
-            ny, nx = pd.shape
-            r = np.sqrt((t['x']-nx/2.)**2 + (t['y']-ny/2.)**2)
-            t.add_column(Column(data=r.data, name='r', dtype=np.float))
+        pd = self.action.args.kd.pixeldata[0]
+        objects = sep.extract(pd.data, err=pd.uncertainty.array,
+                              mask=pd.mask,
+                              thresh=float(thresh), minarea=minarea)
+        t = Table(objects)
 
-            coef = 2*np.sqrt(2*np.log(2))
-            fwhm = np.sqrt((coef*t['a'])**2 + (coef*t['b'])**2)
-            t.add_column(Column(data=fwhm.data, name='FWHM', dtype=np.float))
+        ny, nx = pd.shape
+        r = np.sqrt((t['x']-nx/2.)**2 + (t['y']-ny/2.)**2)
+        t.add_column(Column(data=r.data, name='r', dtype=np.float))
 
-            ellipticities = t['a']/t['b']
-            t.add_column(Column(data=ellipticities.data, name='ellipticity', dtype=np.float))
+        coef = 2*np.sqrt(2*np.log(2))
+        fwhm = np.sqrt((coef*t['a'])**2 + (coef*t['b'])**2)
+        t.add_column(Column(data=fwhm.data, name='FWHM', dtype=np.float))
 
-            self.action.args.objects[i] = t
+        ellipticities = t['a']/t['b']
+        t.add_column(Column(data=ellipticities.data, name='ellipticity', dtype=np.float))
 
-            filtered = (t['a'] < mina) | (t['b'] < minb) | (t['flag'] > 0)
-            self.log.debug(f'  Removing {np.sum(filtered):d}/{len(filtered):d}'\
-                          f' extractions from FWHM calculation')
+        filtered = (t['a'] < mina) | (t['b'] < minb) | (t['flag'] > 0)
+        self.log.debug(f'  Removing {np.sum(filtered):d}/{len(filtered):d}'\
+                      f' extractions from FWHM calculation')
+        self.action.args.n_objects = len(t[~filtered])
+        self.log.info(f'  Found {self.action.args.n_objects:d} stars')
+
+        if self.action.args.n_objects == 0:
+            self.log.warning('No stars found')
+            self.action.args.fwhm = np.nan
+            self.action.args.ellipticity = np.nan
+        else:
             FWHM_pix = np.median(t['FWHM'][~filtered])
             ellipticity = np.median(t['ellipticity'][~filtered])
             self.log.info(f'  Median FWHM = {FWHM_pix:.1f} pix ({FWHM_pix*pixel_scale:.2f} arcsec)')
             self.log.info(f'  ellipticity = {ellipticity:.2f}')
-
-            self.action.args.fwhm[i] = FWHM_pix
-            self.action.args.ellipticity[i] = ellipticity
+            self.action.args.fwhm = FWHM_pix
+            self.action.args.ellipticity = ellipticity
 
         return self.action.args
 
@@ -626,8 +631,9 @@ class Record(BasePrimitive):
                       'moon_alt': self.action.args.moon_alt,
                       'moon_separation': self.action.args.moon_separation,
                       'moon_illumination': self.action.args.moon_illum,
-                      'FWHM_pix': np.mean(self.action.args.fwhm),
-                      'ellipticity': np.mean(self.action.args.ellipticity),
+                      'FWHM_pix': self.action.args.fwhm,
+                      'ellipticity': self.action.args.ellipticity,
+                      'n_stars': self.action.args.n_objects,
                       'analyzed': True,
                       'SIDREversion': 'n/a',
                      }
