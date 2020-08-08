@@ -26,7 +26,8 @@ class QuickLookPipeline(BasePipeline):
         "make_source_mask": ("MakeSourceMask", "making_source_mask", "subtract_background"),
         "subtract_background": ("SubtractBackground", "subtracting_background", "extract"),
         "extract": ("ExtractStars", "extracting_stars", "record"),
-        "record": ("Record", "recording_results_in_mongo", None),
+        "record": ("Record", "recording_results_in_mongo", "copy_data_locally"),
+        "copy_data_locally": ("CopyDataLocally", "copying_data", None),
     }
 
     def __init__(self, context: ProcessingContext):
