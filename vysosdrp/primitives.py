@@ -1,6 +1,7 @@
 from pathlib import Path
 from datetime import datetime, timedelta
 import sys
+import re
 
 import numpy as np
 from astropy.io import fits
@@ -106,6 +107,7 @@ class ReadFITS(BasePrimitive):
         # If we are reading a compressed file, use the uncompressed version of
         # the name for the database
         self.action.args.kd.fitsfile = fitsfile_db
+        self.action.args.kd.fitsfilepath = fitsfile
 
         # Read some header info
         self.action.args.obstime = datetime.strptime(self.action.args.kd.get('DATE-OBS'), '%Y-%m-%dT%H:%M:%S')
@@ -707,9 +709,7 @@ class UpdateDirectory(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
 
-        # Set to today's UT date
-        date_string = datetime.utcnow().strftime('%Y%m%dUT')
-        newdir = Path(f'~/V20Data/Images/{date_string}').expanduser()
+        newdir = Path(self.action.args.input).expanduser()
         if newdir.exists() is False:
             self.log.info(f"  Creating directory {newdir}")
             newdir.mkdir(parents=True)

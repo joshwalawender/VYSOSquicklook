@@ -139,15 +139,17 @@ def watch_directory():
     framework.start(False, False, False, True)
 
 
-def generate_plot():
-    args = _parseArguments(sys.argv)
-    framework = setup_framework(args, pipeline=GeneratePlotOnly)
-    framework.logger.info(f"Processing plot")
-    framework.ingest_data(None, args.input, False)
-    framework.start(False, False, False, False)
-
-
 def change_directory():
+    args = _parseArguments(sys.argv)
+    if args.input is not '':
+        newdir = Path(args.input).expanduser()
+    else:
+        date_string = datetime.utcnow().strftime('%Y%m%dUT')
+        newdir = Path(f'~/V20Data/Images/{date_string}').expanduser()
+    args.input = str(newdir)
+    if newdir.exists() is False:
+        newdir.mkdir(parents=True)
+
     framework_config_fullpath = pkg_resources.resource_filename("vysosdrp", "framework.cfg")
     cfg = ConfigClass(framework_config_fullpath)
     queue = queues.get_event_queue(cfg.queue_manager_hostname,
@@ -157,8 +159,7 @@ def change_directory():
         print("Failed to connect to Queue Manager")
     else:
         pending = queue.get_pending()
-        print(pending)
-        event = Event("update_directory", Arguments())
+        event = Event("update_directory", args)
         queue.put(event)
 
 
