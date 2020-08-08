@@ -718,6 +718,15 @@ class UpdateDirectory(BasePrimitive):
         self.context.data_set.remove_all()
         self.context.data_set.change_directory(f"{newdir}")
 
+        files = [f.name for f in newdir.glob('*.fts')]
+        self.log.info(f"  Ingesting {len(files)} files")
+        self.log.debug(files)
+        for file in files:
+            self.log.debug(f"  Appending {file}")
+            self.context.data_set.append_item(file)
+
+        self.context.data_set.start_monitor()
+
         return self.action.args
 
 
@@ -792,16 +801,20 @@ class CopyDataLocally(BasePrimitive):
             destination = Path(destination).expanduser()
             self.log.debug(f'  Destination: {destination}')
             image_destination = destination.joinpath('Images', '2020', date_string, fitsfile.name)
+            if image_destination.parent.exists() is False:
+                image_destination.parent.mkdir(parents=True)
             image_destination_fz = destination.joinpath('Images', '2020', date_string, f'{fitsfile.name}.fz')
             self.log.debug(f'  Image Destination: {image_destination}')
             log_destination = destination.joinpath('Logs', '2020', date_string)
+            if log_destination.parent.exists() is False:
+                log_destination.parent.mkdir(parents=True)
             self.log.debug(f'  Log Destination: {log_destination}')
 
-            if image_destination.exists() == False and image_destination_fz.exists() == False:
-                with fits.open(fitsfile, checksum=True) as hdul:
-                    hdul[0].add_checksum()
-                    hdul.writeto(image_destination, checksum=True)
-                subprocess.call(['fpack', image_destination])
+#             if image_destination.exists() == False and image_destination_fz.exists() == False:
+#                 with fits.open(fitsfile, checksum=True) as hdul:
+#                     hdul[0].add_checksum()
+#                     hdul.writeto(image_destination, checksum=True)
+#                 subprocess.call(['fpack', image_destination])
 
 
         return self.action.args
