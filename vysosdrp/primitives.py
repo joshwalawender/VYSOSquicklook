@@ -2,6 +2,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import sys
 import re
+import subprocess
 
 import numpy as np
 from astropy.io import fits
@@ -9,7 +10,10 @@ from astropy import units as u
 from astropy import stats
 from astropy.time import Time
 import astropy.coordinates as c
+from astropy.wcs import WCS
 from astropy.table import Table, Column
+from astroquery.exceptions import TimeoutError as astrometryTimeout
+from astroquery.astrometry_net import AstrometryNet
 import ccdproc
 import photutils
 import sep
@@ -637,6 +641,10 @@ class ExtractStars(BasePrimitive):
         self.action.args.n_objects = len(t[~filtered])
         self.log.info(f'  Found {self.action.args.n_objects:d} stars')
 
+        self.action.args.objects = t[~filtered]
+        self.action.args.objects.sort('flux')
+        self.action.args.objects.reverse()
+
         if self.action.args.n_objects == 0:
             self.log.warning('No stars found')
             self.action.args.fwhm = np.nan
@@ -650,6 +658,92 @@ class ExtractStars(BasePrimitive):
             self.action.args.ellipticity = ellipticity
 
         return self.action.args
+
+
+##-----------------------------------------------------------------------------
+## Primitive: SolveAstrometry
+##-----------------------------------------------------------------------------
+class SolveAstrometry(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        """
+        Constructor
+        """
+        BasePrimitive.__init__(self, action, context)
+        # to use the pipeline logger instead of the framework logger, use this:
+        self.log = context.pipeline_logger
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        some_pre_condition = not self.action.args.skip
+
+        if some_pre_condition:
+            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
+            return True
+        else:
+            return False
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        some_post_condition = True
+
+        if some_post_condition:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
+            return True
+        else:
+            return False
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+        inst_cfg = self.context.config.instrument['VYSOS20']
+        ast = AstrometryNet()
+        ast.api_key = inst_cfg.get('api_key', None)
+        solve_timeout = inst_cfg.getint('solve_timeout', 60)
+        nx, ny = self.action.args.kd.pixeldata[0].data.shape
+
+        if self.action.args.n_objects >= 100:
+            stars = self.action.args.objects[:100]
+        else:
+            stars = self.action.args.objects
+
+        try:
+            self.log.debug(f"  Running astrometry.net solve")
+            wcs_header = ast.solve_from_source_list(stars['x'], stars['y'],
+                                                    nx, ny,
+                                                    solve_timeout=solve_timeout)
+            self.log.debug(f"  done")
+        except astrometryTimeout as e:
+            self.log.warning('Astrometry solve timed out')
+            self.action.args.wcs_pointing = None
+            self.action.args.perr = None
+            return self.action.args
+
+        # Determine Pointing
+        wcs = WCS(wcs_header)
+        r, d = wcs.all_pix2world([nx/2.], [ny/2.], 1)
+        self.action.args.wcs_pointing = c.SkyCoord(r[0], d[0], frame='fk5',
+                                          equinox='J2000',
+                                          unit=(u.deg, u.deg),
+                                          obstime=self.action.args.obstime)
+        self.action.args.perr = self.action.args.wcs_pointing.separation(
+                                     self.action.args.header_pointing)
+        self.log.info(f'Pointing error = {self.action.args.perr.to(u.arcmin):.1f}')
+
+        return self.action.args
+
 
 
 ##-----------------------------------------------------------------------------
@@ -734,6 +828,9 @@ class Record(BasePrimitive):
                       'analyzed': True,
                       'SIDREversion': 'n/a',
                      }
+        if self.action.args.perr is not None:
+            image_info['perr_arcmin'] = self.action.args.perr.to(u.arcmin).value
+
         for key in image_info.keys():
             self.log.debug(f'  {key}: {image_info[key]}')
 
