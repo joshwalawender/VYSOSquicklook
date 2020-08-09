@@ -121,6 +121,101 @@ class ReadFITS(BasePrimitive):
 
 
 ##-----------------------------------------------------------------------------
+## Primitive: CopyDataLocally
+##-----------------------------------------------------------------------------
+class CopyDataLocally(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        """
+        Constructor
+        """
+        BasePrimitive.__init__(self, action, context)
+        # to use the pipeline logger instead of the framework logger, use this:
+        self.log = context.pipeline_logger
+        self.pipeline_cfg = self.context.config.instrument['VYSOS20']
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        some_pre_condition = True #not self.action.args.skip
+
+        # Try to determine date string from path to file
+        fitsfile = Path(self.action.args.kd.fitsfilepath)
+        date_string = fitsfile.parts[-2]
+        if not re.match('\d{8}UT', date_string):
+            some_pre_condition = False
+
+        # Check if a destination is set in the config file
+        
+        if self.pipeline_cfg.get('copy_local', None) is None:
+            some_pre_condition = False
+
+        if some_pre_condition:
+            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
+            return True
+        else:
+            return False
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        some_post_condition = True
+
+        if some_post_condition:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
+            return True
+        else:
+            return False
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+
+        # Try to determine date string from path to file
+        fitsfile = Path(self.action.args.kd.fitsfilepath)
+        date_string = fitsfile.parts[-2]
+
+        # Look for log file
+        logfile = fitsfile.parent.parent.parent / 'Logs' / fitsfile.parts[-2] / f"{fitsfile.stem}.log"
+
+        destinations = self.pipeline_cfg.get('copy_local', None).split(',')
+        success = [False] * len(destinations)
+        for destination in destinations:
+            destination = Path(destination).expanduser()
+            self.log.debug(f'  Destination: {destination}')
+            image_destination = destination.joinpath('Images', '2020', date_string, fitsfile.name)
+            if image_destination.parent.exists() is False:
+                image_destination.parent.mkdir(parents=True)
+            image_destination_fz = destination.joinpath('Images', '2020', date_string, f'{fitsfile.name}.fz')
+            self.log.debug(f'  Image Destination: {image_destination}')
+            log_destination = destination.joinpath('Logs', '2020', date_string)
+            if log_destination.parent.exists() is False:
+                log_destination.parent.mkdir(parents=True)
+            self.log.debug(f'  Log Destination: {log_destination}')
+
+            if image_destination.exists() == False and image_destination_fz.exists() == False:
+                self.log.info(f'Writing fits file to {image_destination}')
+                with fits.open(fitsfile, checksum=True) as hdul:
+                    hdul[0].add_checksum()
+                    hdul.writeto(image_destination, checksum=True)
+            if image_destination.exists() == True and image_destination_fz.exists() == False:
+                self.log.info(f'Compressing fits file at {image_destination}')
+                subprocess.call(['fpack', image_destination])
+
+        return self.action.args
+
+
+##-----------------------------------------------------------------------------
 ## Primitive: MoonInfo
 ##-----------------------------------------------------------------------------
 class MoonInfo(BasePrimitive):
@@ -726,96 +821,6 @@ class UpdateDirectory(BasePrimitive):
             self.context.data_set.append_item(file)
 
         self.context.data_set.start_monitor()
-
-        return self.action.args
-
-
-class CopyDataLocally(BasePrimitive):
-    """
-    This is a template for primitives, which is usually an action.
-
-    The methods in the base class can be overloaded:
-    - _pre_condition
-    - _post_condition
-    - _perform
-    - apply
-    - __call__
-    """
-
-    def __init__(self, action, context):
-        """
-        Constructor
-        """
-        BasePrimitive.__init__(self, action, context)
-        # to use the pipeline logger instead of the framework logger, use this:
-        self.log = context.pipeline_logger
-        self.pipeline_cfg = self.context.config.instrument['VYSOS20']
-
-    def _pre_condition(self):
-        """Check for conditions necessary to run this process"""
-        some_pre_condition = True #not self.action.args.skip
-
-        # Try to determine date string from path to file
-        fitsfile = Path(self.action.args.kd.fitsfilepath)
-        date_string = fitsfile.parts[-2]
-        if not re.match('\d{8}UT', date_string):
-            some_pre_condition = False
-
-        # Check if a destination is set in the config file
-        
-        if self.pipeline_cfg.get('copy_local', None) is None:
-            some_pre_condition = False
-
-        if some_pre_condition:
-            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-            return True
-        else:
-            return False
-
-    def _post_condition(self):
-        """Check for conditions necessary to verify that the process run correctly"""
-        some_post_condition = True
-
-        if some_post_condition:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
-            return True
-        else:
-            return False
-
-    def _perform(self):
-        """
-        Returns an Argument() with the parameters that depends on this operation.
-        """
-        self.log.info(f"Running {self.__class__.__name__} action")
-
-        # Try to determine date string from path to file
-        fitsfile = Path(self.action.args.kd.fitsfilepath)
-        date_string = fitsfile.parts[-2]
-
-        # Look for log file
-        logfile = fitsfile.parent.parent.parent / 'Logs' / fitsfile.parts[-2] / f"{fitsfile.stem}.log"
-
-        destinations = self.pipeline_cfg.get('copy_local', None).split(',')
-        success = [False] * len(destinations)
-        for destination in destinations:
-            destination = Path(destination).expanduser()
-            self.log.debug(f'  Destination: {destination}')
-            image_destination = destination.joinpath('Images', '2020', date_string, fitsfile.name)
-            if image_destination.parent.exists() is False:
-                image_destination.parent.mkdir(parents=True)
-            image_destination_fz = destination.joinpath('Images', '2020', date_string, f'{fitsfile.name}.fz')
-            self.log.debug(f'  Image Destination: {image_destination}')
-            log_destination = destination.joinpath('Logs', '2020', date_string)
-            if log_destination.parent.exists() is False:
-                log_destination.parent.mkdir(parents=True)
-            self.log.debug(f'  Log Destination: {log_destination}')
-
-#             if image_destination.exists() == False and image_destination_fz.exists() == False:
-#                 with fits.open(fitsfile, checksum=True) as hdul:
-#                     hdul[0].add_checksum()
-#                     hdul.writeto(image_destination, checksum=True)
-#                 subprocess.call(['fpack', image_destination])
-
 
         return self.action.args
 
