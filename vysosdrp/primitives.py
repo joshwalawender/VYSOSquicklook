@@ -783,7 +783,7 @@ class GetCatalogStars(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = not self.action.args.skip
+        some_pre_condition = not self.action.args.skip and self.action.args.wcs is not None
 
         if self.cfg['jpeg'].get('catalog', None) not in ['Gaia', 'UCAC4']:
             self.log.debug(f"Only support Gaia and UCAC4 catalog")
