@@ -728,7 +728,7 @@ class SolveAstrometry(BasePrimitive):
         except astrometryTimeout as e:
             self.log.warning('Astrometry solve timed out')
             self.action.args.wcs_pointing = None
-            self.action.args.perr = None
+            self.action.args.perr = np.nan
             return self.action.args
 
         # Determine Pointing
