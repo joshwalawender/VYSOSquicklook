@@ -89,8 +89,6 @@ class ReadFITS(BasePrimitive):
             self.log.info(f"  Could not find file: {fitsfile}")
             return False
 
-        inst_cfg = self.context.config.instrument['VYSOS20']
-
         # If we are reading a compressed file, use the uncompressed version of
         # the name for the database
         if fitsfile.suffix == '.fz':
@@ -101,7 +99,7 @@ class ReadFITS(BasePrimitive):
         # Check if this exists in the database already
         already_processed = [d for d in self.images.find( {'filename': fitsfile_db} )]
         self.action.args.skip = False
-        if len(already_processed) != 0 and inst_cfg.getboolean('overwrite', False) is False:
+        if len(already_processed) != 0 and self.cfg['VYSOS20'].getboolean('overwrite', False) is False:
             self.log.info('  File is already in the database, skipping further processing')
             self.action.args.skip = True
 
@@ -146,11 +144,11 @@ class CopyDataLocally(BasePrimitive):
         BasePrimitive.__init__(self, action, context)
         # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
-        self.pipeline_cfg = self.context.config.instrument['VYSOS20']
+        self.cfg = self.context.config.instrument
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = True #not self.action.args.skip
+        some_pre_condition = not self.action.args.skip
 
         # Try to determine date string from path to file
         fitsfile = Path(self.action.args.kd.fitsfilepath)
@@ -160,7 +158,7 @@ class CopyDataLocally(BasePrimitive):
 
         # Check if a destination is set in the config file
         
-        if self.pipeline_cfg.get('copy_local', None) is None:
+        if self.cfg['VYSOS20'].get('copy_local', None) is None:
             some_pre_condition = False
 
         if some_pre_condition:
@@ -192,7 +190,7 @@ class CopyDataLocally(BasePrimitive):
         # Look for log file
         logfile = fitsfile.parent.parent.parent / 'Logs' / fitsfile.parts[-2] / f"{fitsfile.stem}.log"
 
-        destinations = self.pipeline_cfg.get('copy_local', None).split(',')
+        destinations = self.cfg['VYSOS20'].get('copy_local', None).split(',')
         success = [False] * len(destinations)
         for destination in destinations:
             destination = Path(destination).expanduser()
@@ -241,6 +239,7 @@ class MoonInfo(BasePrimitive):
         BasePrimitive.__init__(self, action, context)
         # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
@@ -268,13 +267,12 @@ class MoonInfo(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
 
-        inst_cfg = self.context.config.instrument['VYSOS20']
         self.lat = c.Latitude(self.action.args.kd.get('SITELAT'), unit=u.degree)
         self.lon = c.Longitude(self.action.args.kd.get('SITELONG'), unit=u.degree)
         self.height = float(self.action.args.kd.get('ALT-OBS')) * u.meter
         self.loc = c.EarthLocation(self.lon, self.lat, self.height)
         tmperature = float(self.action.args.kd.get('AMBTEMP'))*u.Celsius
-        press = inst_cfg.getfloat('pressure', 700)*u.mbar
+        press = self.cfg['VYSOS20'].getfloat('pressure', 700)*u.mbar
         self.action.args.altazframe = c.AltAz(location=self.loc,
                           obstime=self.action.args.obstime,
                           temperature=tmperature,
@@ -324,6 +322,7 @@ class GainCorrect(BasePrimitive):
         BasePrimitive.__init__(self, action, context)
         # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
@@ -354,7 +353,7 @@ class GainCorrect(BasePrimitive):
         gain = self.action.args.kd.get('GAIN', None)
         if gain is not None: self.log.debug(f'Got gain from header: {gain}')
         if gain is None:
-            gain = self.context.config.instrument['VYSOS20'].getfloat('gain', None)
+            gain = self.cfg['VYSOS20'].getfloat('gain', None)
             self.log.debug(f'Got gain from config: {gain}')
             self.action.args.kd.headers.append(fits.Header( {'GAIN': gain} ))
 
@@ -388,6 +387,7 @@ class CreateDeviation(BasePrimitive):
         BasePrimitive.__init__(self, action, context)
         # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
@@ -422,7 +422,7 @@ class CreateDeviation(BasePrimitive):
         if rn is not None: self.log.debug(f'Got read noise from header: {rn}')
 
         if rn is None:
-            rn = self.context.config.instrument['VYSOS20'].getfloat('RN', None)
+            rn = self.cfg['VYSOS20'].getfloat('RN', None)
             self.log.debug(f'Got read noise from config: {rn}')
             self.action.args.kd.headers.append(fits.Header( {'READNOISE': rn} ))
 
@@ -436,7 +436,6 @@ class CreateDeviation(BasePrimitive):
                                    readnoise=rn*u.electron)
             else:
                 self.log.error('Could not estimate uncertainty')
-
 
         return self.action.args
 
@@ -522,6 +521,7 @@ class SubtractBackground(BasePrimitive):
         BasePrimitive.__init__(self, action, context)
         # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
@@ -548,7 +548,7 @@ class SubtractBackground(BasePrimitive):
         Returns an Argument() with the parameters that depends on this operation.
         """
         self.log.info(f"Running {self.__class__.__name__} action")
-        box_size = self.context.config.instrument['VYSOS20'].getint('background_box_size', 128)
+        box_size = self.cfg['Extract'].getint('background_box_size', 128)
 
         self.action.args.background = [None] * len(self.action.args.kd.pixeldata)
         for i,pd in enumerate(self.action.args.kd.pixeldata):
@@ -582,6 +582,7 @@ class ExtractStars(BasePrimitive):
         BasePrimitive.__init__(self, action, context)
         # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
@@ -608,12 +609,11 @@ class ExtractStars(BasePrimitive):
         Returns an Argument() with the parameters that depends on this operation.
         """
         self.log.info(f"Running {self.__class__.__name__} action")
-        inst_cfg = self.context.config.instrument['VYSOS20']
-        pixel_scale = inst_cfg.getfloat('pixel_scale', 1)
-        thresh = inst_cfg.getint('extract_threshold', 9)
-        minarea = inst_cfg.getint('extract_minarea', 7)
-        mina = inst_cfg.getint('fwhm_mina', 1)
-        minb = inst_cfg.getint('fwhm_minb', 1)
+        pixel_scale = self.cfg['VYSOS20'].getfloat('pixel_scale', 1)
+        thresh = self.cfg['Extract'].getint('extract_threshold', 9)
+        minarea = self.cfg['Extract'].getint('extract_minarea', 7)
+        mina = self.cfg['Extract'].getint('fwhm_mina', 1)
+        minb = self.cfg['Extract'].getint('fwhm_minb', 1)
 
         self.action.args.fwhm = np.nan
         self.action.args.ellipticity = np.nan
@@ -682,6 +682,7 @@ class SolveAstrometry(BasePrimitive):
         BasePrimitive.__init__(self, action, context)
         # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
@@ -708,10 +709,9 @@ class SolveAstrometry(BasePrimitive):
         Returns an Argument() with the parameters that depends on this operation.
         """
         self.log.info(f"Running {self.__class__.__name__} action")
-        inst_cfg = self.context.config.instrument['VYSOS20']
         ast = AstrometryNet()
-        ast.api_key = inst_cfg.get('api_key', None)
-        solve_timeout = inst_cfg.getint('solve_timeout', 60)
+        ast.api_key = self.cfg['astrometry'].get('api_key', None)
+        solve_timeout = self.cfg['astrometry'].getint('solve_timeout', 90)
         nx, ny = self.action.args.kd.pixeldata[0].data.shape
 
         if self.action.args.n_objects >= 100:
@@ -768,11 +768,11 @@ class Record(BasePrimitive):
         BasePrimitive.__init__(self, action, context)
         # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        inst_cfg = self.context.config.instrument['VYSOS20']
-        some_pre_condition = (not self.action.args.skip) and (not inst_cfg.getboolean('norecord', False))
+        some_pre_condition = (not self.action.args.skip) and (not self.cfg['VYSOS20'].getboolean('norecord', False))
 
         try:
             import pymongo
@@ -941,6 +941,7 @@ class UpdateDirectory(BasePrimitive):
 #         BasePrimitive.__init__(self, action, context)
 #         # to use the pipeline logger instead of the framework logger, use this:
 #         self.log = context.pipeline_logger
+#         self.cfg = self.context.config.instrument
 # 
 #     def _pre_condition(self):
 #         """Check for conditions necessary to run this process"""
@@ -967,7 +968,6 @@ class UpdateDirectory(BasePrimitive):
 #         Returns an Argument() with the parameters that depends on this operation.
 #         """
 #         self.log.info(f"Running {self.__class__.__name__} action")
-#         inst_cfg = self.context.config.instrument['VYSOS20']
 # 
 #         return self.action.args
 
