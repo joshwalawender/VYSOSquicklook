@@ -80,29 +80,48 @@ def setup_framework(args, pipeline=QuickLookPipeline):
 
 def analyze_one():
     args = _parseArguments(sys.argv)
-    framework = setup_framework(args)
+    p = Path(args.input).expanduser()
+    if p.exists() is False:
+        print(f'Unable to find file: {p}')
+        return
+    args.name = f"{p}"
 
-    if args.input is not '':
-        p = Path(args.input).expanduser()
-        args.input = str(p)
-        if p.exists() is False:
-            framework.context.pipeline_logger.error(f'Could not find file: {args.input}')
-        else:
-            base_path = [x for x in p.parents][-3]
-            if base_path == Path('/Users/vysosuser'):
-                pass
-            elif base_path == Path('/Volumes/VYSOSData'):
-                framework.context.pipeline_logger.info(f'Setting file_type to *.fz')
-                framework.config['DEFAULT']['file_type'] = '*.fz'
+    framework_config_fullpath = pkg_resources.resource_filename("vysosdrp", "framework.cfg")
+    cfg = ConfigClass(framework_config_fullpath)
+    queue = queues.get_event_queue(cfg.queue_manager_hostname,
+                                   cfg.queue_manager_portnr,
+                                   cfg.queue_manager_auth_code)
+    if queue is None:
+        print("Failed to connect to Queue Manager")
+    else:
+        pending = queue.get_pending()
+        event = Event("next_file", args)
+        queue.put(event)
 
-            if p.is_file() is True:
-                framework.context.pipeline_logger.info(f'Found file: {args.input}')
-            elif p.is_dir() is True:
-                framework.context.pipeline_logger.info(f'Found directory: {args.input}')
-
-    framework.logger.info(f"Processing single file: {args.input}")
-    framework.ingest_data(None, [args.input], False)
-    framework.start(False, False, False, False)
+#     args = _parseArguments(sys.argv)
+#     framework = setup_framework(args)
+# 
+#     if args.input is not '':
+#         p = Path(args.input).expanduser()
+#         args.input = str(p)
+#         if p.exists() is False:
+#             framework.context.pipeline_logger.error(f'Could not find file: {args.input}')
+#         else:
+#             base_path = [x for x in p.parents][-3]
+#             if base_path == Path('/Users/vysosuser'):
+#                 pass
+#             elif base_path == Path('/Volumes/VYSOSData'):
+#                 framework.context.pipeline_logger.info(f'Setting file_type to *.fz')
+#                 framework.config['DEFAULT']['file_type'] = '*.fz'
+# 
+#             if p.is_file() is True:
+#                 framework.context.pipeline_logger.info(f'Found file: {args.input}')
+#             elif p.is_dir() is True:
+#                 framework.context.pipeline_logger.info(f'Found directory: {args.input}')
+# 
+#     framework.logger.info(f"Processing single file: {args.input}")
+#     framework.ingest_data(None, [args.input], False)
+#     framework.start(False, False, False, False)
 
 
 def watch_directory():
