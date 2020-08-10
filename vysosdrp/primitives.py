@@ -128,7 +128,7 @@ class ReadFITS(BasePrimitive):
         try:
             self.action.args.wcs = WCS(self.action.args.kd.header[0])
         except:
-            self.log.warning('Unable to read WCS from header')
+            self.log.debug('Unable to read WCS from header')
             pass
 
         return self.action.args
@@ -880,7 +880,7 @@ class RenderJPEG(BasePrimitive):
         ax = fig.gca()
         mdata = np.ma.MaskedArray(im)
         palette = plt.cm.gray
-        palette.set_bad('r', 1.0)
+#         palette.set_bad('r', 1.0)
         plt.imshow(mdata, cmap=palette, vmin=vmin, vmax=vmax)
         plt.xticks([])
         plt.yticks([])
@@ -900,7 +900,7 @@ class RenderJPEG(BasePrimitive):
             x, y = self.action.args.wcs.all_world2pix(self.action.args.catalog['_RAJ2000'],
                                                       self.action.args.catalog['_DEJ2000'], 1)
             for xy in zip(x, y):
-                if x > 0 and x < nx and y > 0 and y < ny:
+                if xy[0] > 0 and xy[0] < nx and xy[1] > 0 and xy[1] < ny:
                     c = plt.Circle(xy, radius=radius, edgecolor='b', facecolor='none')
                     ax.add_artist(c)
 
@@ -924,7 +924,8 @@ class RenderJPEG(BasePrimitive):
 
         self.action.args.jpegfile = Path('/var/www/plots/V20/') / jpegfilename
         self.log.info(f'  Rendering: {self.action.args.jpegfile}')
-        
+        plt.xlim(0,nx)
+        plt.ylim(0,ny)
         plt.savefig(self.action.args.jpegfile, dpi=dpi)
 
         return self.action.args
@@ -1058,24 +1059,20 @@ class UpdateDirectory(BasePrimitive):
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
         some_pre_condition = True
-
-        if some_pre_condition:
+        if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-            return True
         else:
-            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
-            return False
+            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
         some_post_condition = True
-
-        if some_post_condition:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
-            return True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
         else:
-            self.log.warning(f"Postcondition for {self.__class__.__name__} failed")
-            return False
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
 
     def _perform(self):
         """
