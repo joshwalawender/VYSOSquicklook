@@ -1031,7 +1031,7 @@ class Record(BasePrimitive):
                       'analyzed': True,
                       'SIDREversion': 'n/a',
                      }
-        if self.action.args.perr is not None:
+        if self.action.args.perr is not None and not np.isnan(self.action.args.perr):
             image_info['perr_arcmin'] = self.action.args.perr.to(u.arcmin).value
         if self.action.args.jpegfile is not None:
             image_info['jpegs'] = [f"{self.action.args.jpegfile.name}"]
