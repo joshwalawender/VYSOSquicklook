@@ -58,7 +58,6 @@ class ReadFITS(BasePrimitive):
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
         some_pre_condition = True
-
         try:
             import pymongo
             self.log.debug('Connecting to mongo db at 192.168.1.101')
@@ -69,21 +68,20 @@ class ReadFITS(BasePrimitive):
             self.log.error('Could not connect to mongo db')
             some_pre_condition = False
 
-        if some_pre_condition:
-            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-            return True
+        if some_pre_condition is True:
+            self.log.debug(f"Precondition for {self.__class__.__name__} satisfied")
         else:
-            return False
+            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
         some_post_condition = True
-
-        if some_post_condition:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
-            return True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
         else:
-            return False
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
 
     def _perform(self):
         """
@@ -175,21 +173,20 @@ class CopyDataLocally(BasePrimitive):
         if self.cfg['VYSOS20'].get('copy_local', None) is None:
             some_pre_condition = False
 
-        if some_pre_condition:
+        if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-            return True
         else:
-            return False
+            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
         some_post_condition = True
-
-        if some_post_condition:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
-            return True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
         else:
-            return False
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
 
     def _perform(self):
         """
@@ -259,21 +256,20 @@ class MoonInfo(BasePrimitive):
         """Check for conditions necessary to run this process"""
         some_pre_condition = not self.action.args.skip
 
-        if some_pre_condition:
+        if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-            return True
         else:
-            return False
+            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
         some_post_condition = True
-
-        if some_post_condition:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
-            return True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
         else:
-            return False
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
 
     def _perform(self):
         """
@@ -342,21 +338,20 @@ class GainCorrect(BasePrimitive):
         """Check for conditions necessary to run this process"""
         some_pre_condition = not self.action.args.skip
 
-        if some_pre_condition:
+        if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-            return True
         else:
-            return False
+            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
         some_post_condition = True
-
-        if some_post_condition:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
-            return True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
         else:
-            return False
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
 
     def _perform(self):
         """
@@ -407,21 +402,20 @@ class CreateDeviation(BasePrimitive):
         """Check for conditions necessary to run this process"""
         some_pre_condition = not self.action.args.skip
 
-        if some_pre_condition:
+        if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-            return True
         else:
-            return False
+            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
         some_post_condition = True
-
-        if some_post_condition:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
-            return True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
         else:
-            return False
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
 
     def _perform(self):
         """
@@ -482,22 +476,20 @@ class MakeSourceMask(BasePrimitive):
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
         some_pre_condition = not self.action.args.skip
-
-        if some_pre_condition:
+        if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-            return True
         else:
-            return False
+            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
         some_post_condition = True
-
-        if some_post_condition:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
-            return True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
         else:
-            return False
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
 
     def _perform(self):
         """
@@ -540,22 +532,20 @@ class SubtractBackground(BasePrimitive):
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
         some_pre_condition = not self.action.args.skip
-
-        if some_pre_condition:
+        if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-            return True
         else:
-            return False
+            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
         some_post_condition = True
-
-        if some_post_condition:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
-            return True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
         else:
-            return False
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
 
     def _perform(self):
         """
@@ -601,22 +591,20 @@ class ExtractStars(BasePrimitive):
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
         some_pre_condition = not self.action.args.skip
-
-        if some_pre_condition:
+        if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-            return True
         else:
-            return False
+            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
         some_post_condition = True
-
-        if some_post_condition:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
-            return True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
         else:
-            return False
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
 
     def _perform(self):
         """
@@ -701,22 +689,20 @@ class SolveAstrometry(BasePrimitive):
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
         some_pre_condition = not self.action.args.skip
-
-        if some_pre_condition:
+        if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-            return True
         else:
-            return False
+            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
         some_post_condition = True
-
-        if some_post_condition:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
-            return True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
         else:
-            return False
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
 
     def _perform(self):
         """
@@ -784,26 +770,23 @@ class GetCatalogStars(BasePrimitive):
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
         some_pre_condition = not self.action.args.skip and self.action.args.wcs is not None
-
         if self.cfg['jpeg'].get('catalog', None) not in ['Gaia', 'UCAC4']:
             self.log.debug(f"Only support Gaia and UCAC4 catalog")
             some_pre_condition = False
-
-        if some_pre_condition:
+        if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-            return True
         else:
-            return False
+            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
         some_post_condition = True
-
-        if some_post_condition:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
-            return True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
         else:
-            return False
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
 
     def _perform(self):
         """
@@ -863,22 +846,20 @@ class RenderJPEG(BasePrimitive):
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
         some_pre_condition = not self.action.args.skip
-
-        if some_pre_condition:
+        if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-            return True
         else:
-            return False
+            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
         some_post_condition = True
-
-        if some_post_condition:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
-            return True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
         else:
-            return False
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
 
     def _perform(self):
         """
@@ -976,7 +957,6 @@ class Record(BasePrimitive):
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
         some_pre_condition = (not self.action.args.skip) and (not self.cfg['VYSOS20'].getboolean('norecord', False))
-
         try:
             import pymongo
             self.log.debug('Connecting to mongo db at 192.168.1.101')
@@ -985,23 +965,20 @@ class Record(BasePrimitive):
         except:
             self.log.error('Could not connect to mongo db')
             some_pre_condition = False
-
-        if some_pre_condition:
+        if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-            return True
         else:
-            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
-            return False
+            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
         some_post_condition = True
-
-        if some_post_condition:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
-            return True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
         else:
-            return False
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
 
     def _perform(self):
         """
@@ -1151,22 +1128,20 @@ class UpdateDirectory(BasePrimitive):
 #     def _pre_condition(self):
 #         """Check for conditions necessary to run this process"""
 #         some_pre_condition = not self.action.args.skip
-# 
-#         if some_pre_condition:
+#         if some_pre_condition is True:
 #             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-#             return True
 #         else:
-#             return False
+#             self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+#         return some_pre_condition
 # 
 #     def _post_condition(self):
 #         """Check for conditions necessary to verify that the process run correctly"""
 #         some_post_condition = True
-# 
-#         if some_post_condition:
-#             self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
-#             return True
+#         if some_post_condition is True:
+#             self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
 #         else:
-#             return False
+#             self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+#         return some_post_condition
 # 
 #     def _perform(self):
 #         """
