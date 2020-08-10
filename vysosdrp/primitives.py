@@ -908,9 +908,10 @@ class RenderJPEG(BasePrimitive):
             self.log.info('  Overlaying extracted stars')
             radius = self.cfg['jpeg'].getfloat('extracted_radius', 6)
             for star in self.action.args.objects:
-                c = plt.Circle((star['x'], star['y']), radius=radius,
-                               edgecolor='r', facecolor='none')
-                ax.add_artist(c)
+                if star['x'] > 0 and star['x'] < nx and star['y'] > 0 and star['y'] < ny:
+                    c = plt.Circle((star['x'], star['y']), radius=radius,
+                                   edgecolor='r', facecolor='none')
+                    ax.add_artist(c)
 
         if self.cfg['jpeg'].getboolean('overplot_catalog', False) is True and self.action.args.catalog is not None:
             self.log.info('  Overlaying catalog stars')
@@ -918,8 +919,9 @@ class RenderJPEG(BasePrimitive):
             x, y = self.action.args.wcs.all_world2pix(self.action.args.catalog['_RAJ2000'],
                                                       self.action.args.catalog['_DEJ2000'], 1)
             for xy in zip(x, y):
-                c = plt.Circle(xy, radius=radius, edgecolor='b', facecolor='none')
-                ax.add_artist(c)
+                if x > 0 and x < nx and y > 0 and y < ny:
+                    c = plt.Circle(xy, radius=radius, edgecolor='b', facecolor='none')
+                    ax.add_artist(c)
 
         if self.cfg['jpeg'].getboolean('overplot_pointing', False) is True\
             and self.action.args.header_pointing is not None\
