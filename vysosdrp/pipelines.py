@@ -27,7 +27,9 @@ class QuickLookPipeline(BasePipeline):
         "make_source_mask": ("MakeSourceMask", "making_source_mask", "subtract_background"),
         "subtract_background": ("SubtractBackground", "subtracting_background", "extract"),
         "extract": ("ExtractStars", "extracting_stars", "solve_astrometry"),
-        "solve_astrometry": ("SolveAstrometry", "solving", "record"),
+        "solve_astrometry": ("SolveAstrometry", "solving", "get_catalog"),
+        "get_catalog": ("GetCatalogStars", "getting_catalog", "render_jpeg"),
+        "render_jpeg": ("RenderJPEG", "rendering_jpeg", "record"),
         "record": ("Record", "recording_results_in_mongo", None),
     }
 

@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import sys
 import re
 import subprocess
+from matplotlib import pyplot as plt
 
 import numpy as np
 from astropy.io import fits
@@ -46,6 +47,13 @@ class ReadFITS(BasePrimitive):
         BasePrimitive.__init__(self, action, context)
         # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
+        # initialize to None
+        self.action.args.objects = None
+        self.action.args.wcs_pointing = None
+        self.action.args.perr = np.nan
+        self.action.args.wcs = None
+        self.action.args.catalog = None
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
@@ -118,6 +126,12 @@ class ReadFITS(BasePrimitive):
         rawDEC = self.action.args.kd.get('DEC')
         self.action.args.header_pointing = c.SkyCoord(rawRA, rawDEC, frame='fk5',
                                                       unit=(u.hourangle, u.deg))
+
+        try:
+            self.action.args.wcs = WCS(self.action.args.kd.header[0])
+        except:
+            self.log.warning('Unable to read WCS from header')
+            pass
 
         return self.action.args
 
@@ -727,13 +741,11 @@ class SolveAstrometry(BasePrimitive):
             self.log.debug(f"  done")
         except astrometryTimeout as e:
             self.log.warning('Astrometry solve timed out')
-            self.action.args.wcs_pointing = None
-            self.action.args.perr = np.nan
             return self.action.args
 
         # Determine Pointing
-        wcs = WCS(wcs_header)
-        r, d = wcs.all_pix2world([nx/2.], [ny/2.], 1)
+        self.action.args.wcs = WCS(wcs_header)
+        r, d = self.action.args.wcs.all_pix2world([nx/2.], [ny/2.], 1)
         self.action.args.wcs_pointing = c.SkyCoord(r[0], d[0], frame='fk5',
                                           equinox='J2000',
                                           unit=(u.deg, u.deg),
@@ -744,6 +756,195 @@ class SolveAstrometry(BasePrimitive):
 
         return self.action.args
 
+
+##-----------------------------------------------------------------------------
+## Primitive: GetCatalogStars
+##-----------------------------------------------------------------------------
+class GetCatalogStars(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        """
+        Constructor
+        """
+        BasePrimitive.__init__(self, action, context)
+        # to use the pipeline logger instead of the framework logger, use this:
+        self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        some_pre_condition = not self.action.args.skip
+
+        if self.cfg['jpeg'].get('catalog', None) not in ['Gaia', 'UCAC4']:
+            self.log.debug(f"Only support Gaia and UCAC4 catalog")
+            some_pre_condition = False
+
+        if some_pre_condition:
+            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
+            return True
+        else:
+            return False
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        some_post_condition = True
+
+        if some_post_condition:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
+            return True
+        else:
+            return False
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+
+        catalogname = self.cfg['jpeg'].get('catalog')
+        catalog = {'UCAC4': 'I/322A', 'Gaia': 'I/345/gaia2'}[catalogname]
+        from astroquery.vizier import Vizier
+        v = Vizier(columns=['_RAJ2000', '_DEJ2000', 'rmag'],
+                   column_filters={"rmag":">0"})
+        v.ROW_LIMIT = 1e5
+
+        fp = self.action.args.wcs.calc_footprint(axes=self.action.args.kd.pixeldata[0].data.shape)
+        dra = fp[:,0].max() - fp[:,0].min()
+        ddec = fp[:,1].max() - fp[:,1].min()
+        radius = np.sqrt((dra*np.cos(fp[:,1].mean()*np.pi/180.))**2 + ddec**2)/2.
+
+        if self.action.args.wcs_pointing is not None:
+            pointing = self.action.args.wcs_pointing
+        else:
+            pointing = self.action.args.header_pointing
+
+        self.action.args.catalog = v.query_region(pointing, catalog=catalog,
+                                                  radius=c.Angle(radius, "deg"))[0]
+        self.log.info(f"Retrieved {len(self.action.args.catalog)} catalog entries")
+        self.log.info(self.action.args.catalog.keys())
+
+        return self.action.args
+
+
+##-----------------------------------------------------------------------------
+## Primitive: RenderJPEG
+##-----------------------------------------------------------------------------
+class RenderJPEG(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        """
+        Constructor
+        """
+        BasePrimitive.__init__(self, action, context)
+        # to use the pipeline logger instead of the framework logger, use this:
+        self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        some_pre_condition = not self.action.args.skip
+
+        if some_pre_condition:
+            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
+            return True
+        else:
+            return False
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        some_post_condition = True
+
+        if some_post_condition:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} is satisfied")
+            return True
+        else:
+            return False
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+
+        im = self.action.args.kd.pixeldata[0].data
+        binning = self.cfg['jpeg'].getint('binning', 1)
+        jpegfilename = f'{self.action.args.kd.fitsfile.split(".")[0]}.jpg'
+        vmin = np.percentile(im, self.cfg['jpeg'].getfloat('vmin_percent', 0.5))
+        vmax = np.percentile(im, self.cfg['jpeg'].getfloat('vmax_percent', 99))
+        dpi = self.cfg['jpeg'].getint('dpi', 72)
+        nx, ny = im.shape
+        sx = nx/dpi/binning
+        sy = ny/dpi/binning
+        fig = plt.figure(figsize=(sx, sy), dpi=dpi)
+        ax = fig.gca()
+        mdata = np.ma.MaskedArray(im)
+        palette = plt.cm.gray
+        palette.set_bad('r', 1.0)
+        plt.imshow(mdata, cmap=palette, vmin=vmin, vmax=vmax)
+        plt.xticks([])
+        plt.yticks([])
+
+        if self.cfg['jpeg'].getboolean('overplot_extracted', False) is True and self.action.args.objects is not None:
+            self.log.info('  Overlaying extracted stars')
+            radius = self.cfg['jpeg'].getfloat('extracted_radius', 6)
+            for star in self.action.args.objects:
+                c = plt.Circle((star['x'], star['y']), radius=radius,
+                               edgecolor='r', facecolor='none')
+                ax.add_artist(c)
+
+        if self.cfg['jpeg'].getboolean('overplot_catalog', False) is True and self.action.args.catalog is not None:
+            self.log.info('  Overlaying catalog stars')
+            radius = self.cfg['jpeg'].getfloat('catalog_radius', 6)
+            x, y = self.action.args.wcs.all_world2pix(self.action.args.catalog['_RAJ2000'],
+                                                      self.action.args.catalog['_DEJ2000'], 1)
+            for xy in zip(x, y):
+                c = plt.Circle(xy, radius=radius, edgecolor='b', facecolor='none')
+                ax.add_artist(c)
+
+        if self.cfg['jpeg'].getboolean('overplot_pointing', False) is True\
+            and self.action.args.header_pointing is not None\
+            and self.action.args.wcs_pointing is not None:
+            x, y = self.action.args.wcs.all_world2pix(self.action.args.header_pointing.ra.degree,
+                                                      self.action.args.header_pointing.dec.degree, 1)
+            plt.plot([0,nx], [ny/2,ny/2], 'y-', alpha=0.7)
+            plt.plot([nx/2, nx/2], [0,ny], 'y-', alpha=0.7)
+            # Draw crosshair on target
+            radius = self.cfg['jpeg'].getfloat('pointing_radius', 6)
+            c = plt.Circle((x, y), radius=radius, edgecolor='g', alpha=0.7,
+                           facecolor='none')
+            ax.add_artist(c)
+            plt.plot([x, x], [y+0.6*radius, y+1.4*radius], 'g', alpha=0.7)
+            plt.plot([x, x], [y-0.6*radius, y-1.4*radius], 'g', alpha=0.7)
+            plt.plot([x-0.6*radius, x-1.4*radius], [y, y], 'g', alpha=0.7)
+            plt.plot([x+0.6*radius, x+1.4*radius], [y, y], 'g', alpha=0.7)
+
+
+        self.action.args.jpegfile = Path('/var/www/plots/V20/') / jpegfilename
+        self.log.info(f'  Rendering: {self.action.args.jpegfile}')
+        
+        plt.savefig(self.action.args.jpegfile, dpi=dpi)
+
+        return self.action.args
 
 
 ##-----------------------------------------------------------------------------
@@ -830,6 +1031,8 @@ class Record(BasePrimitive):
                      }
         if self.action.args.perr is not None:
             image_info['perr_arcmin'] = self.action.args.perr.to(u.arcmin).value
+        if self.action.args.jpegfile is not None:
+            image_info['jpegs'] = [f"{self.action.args.jpegfile.name}"]
 
         for key in image_info.keys():
             self.log.debug(f'  {key}: {image_info[key]}')
