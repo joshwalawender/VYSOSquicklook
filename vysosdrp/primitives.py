@@ -24,6 +24,8 @@ from keckdata import fits_reader, VYSOS20
 from keckdrpframework.primitives.base_primitive import BasePrimitive
 from keckdrpframework.models.arguments import Arguments
 
+from .tools import get_catalog
+
 
 ##-----------------------------------------------------------------------------
 ## Primitive: ReadFITS
@@ -48,24 +50,51 @@ class ReadFITS(BasePrimitive):
         # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
         self.cfg = self.context.config.instrument
-        # initialize to None
+        # initialize values
         self.action.args.objects = None
         self.action.args.wcs_pointing = None
         self.action.args.perr = np.nan
         self.action.args.wcs = None
         self.action.args.catalog = None
+        self.action.args.skip = False
+        self.action.args.fwhm = np.nan
+        self.action.args.ellipticity = np.nan
+        self.action.args.fitsfilepath = Path(self.action.args.name).expanduser()
+
+        # If we are reading a compressed file, use the uncompressed version of
+        # the name for the database
+        if self.action.args.fitsfilepath.suffix == '.fz':
+            self.action.args.fitsfile = '.'.join(self.action.args.fitsfilepath.name.split('.')[:-1])
+        else:
+            self.action.args.fitsfile = self.action.args.fitsfilepath.name
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
         some_pre_condition = True
+
+        # Check that fits file exists
+        if self.action.args.fitsfilepath.exists():
+            self.log.info(f"  File: {self.action.args.fitsfilepath}")
+        else:
+            self.log.info(f"  Could not find file: {self.action.args.fitsfilepath}")
+            some_pre_condition = False
+
+        # Check for mongo DB connection
         try:
             import pymongo
             self.log.debug('Connecting to mongo db at 192.168.1.101')
-            self.mongoclient = pymongo.MongoClient('192.168.1.101', 27017)
+            self.mongoclient = pymongo.MongoClient('localhost', 27017)
             self.images = self.mongoclient.vysos['images']
             self.mongoclient.close()
         except:
             self.log.error('Could not connect to mongo db')
+            some_pre_condition = False
+
+        # Check if this exists in the database already
+        already_processed = [d for d in self.images.find( {'filename': self.action.args.fitsfile} )]
+        if len(already_processed) != 0 and self.cfg['VYSOS20'].getboolean('overwrite', False) is False:
+            self.log.info('  File is already in the database, skipping further processing')
+            self.action.args.skip = True
             some_pre_condition = False
 
         if some_pre_condition is True:
@@ -88,41 +117,23 @@ class ReadFITS(BasePrimitive):
         Returns an Argument() with the parameters that depends on this operation.
         """
         self.log.info(f"Running {self.__class__.__name__} action")
-        fitsfile = Path(self.action.args.name).expanduser()
-        if fitsfile.exists():
-            self.log.info(f"  File: {fitsfile}")
-        else:
-            self.log.info(f"  Could not find file: {fitsfile}")
-            return False
-
-        # If we are reading a compressed file, use the uncompressed version of
-        # the name for the database
-        if fitsfile.suffix == '.fz':
-            fitsfile_db = '.'.join(fitsfile.name.split('.')[:-1])
-        else:
-            fitsfile_db = fitsfile.name
-
-        # Check if this exists in the database already
-        already_processed = [d for d in self.images.find( {'filename': fitsfile_db} )]
-        self.action.args.skip = False
-        if len(already_processed) != 0 and self.cfg['VYSOS20'].getboolean('overwrite', False) is False:
-            self.log.info('  File is already in the database, skipping further processing')
-            self.action.args.skip = True
 
         # Read FITS file
-        self.action.args.kd = fits_reader(fitsfile, datatype=VYSOS20)
+        self.action.args.kd = fits_reader(self.action.args.fitsfilepath,
+                                          datatype=VYSOS20)
 
         # If we are reading a compressed file, use the uncompressed version of
         # the name for the database
-        self.action.args.kd.fitsfile = fitsfile_db
-        self.action.args.kd.fitsfilepath = fitsfile
+#         self.action.args.kd.fitsfile = fitsfile_db
+#         self.action.args.kd.fitsfilepath = fitsfile
 
         # Read some header info
-        self.action.args.obstime = datetime.strptime(self.action.args.kd.get('DATE-OBS'), '%Y-%m-%dT%H:%M:%S')
+        self.action.args.obstime = datetime.strptime(self.action.args.kd.get('DATE-OBS'),
+                                                     '%Y-%m-%dT%H:%M:%S')
 
-        rawRA = self.action.args.kd.get('RA')
-        rawDEC = self.action.args.kd.get('DEC')
-        self.action.args.header_pointing = c.SkyCoord(rawRA, rawDEC, frame='fk5',
+        self.action.args.header_pointing = c.SkyCoord(self.action.args.kd.get('RA'),
+                                                      self.action.args.kd.get('DEC'),
+                                                      frame='fk5',
                                                       unit=(u.hourangle, u.deg))
 
         try:
@@ -162,14 +173,13 @@ class CopyDataLocally(BasePrimitive):
         """Check for conditions necessary to run this process"""
         some_pre_condition = not self.action.args.skip
 
-        # Try to determine date string from path to file
-        fitsfile = Path(self.action.args.kd.fitsfilepath)
-        date_string = fitsfile.parts[-2]
-        if not re.match('\d{8}UT', date_string):
+        if self.action.args.fitsfilepath.parts[:5] != ['/', 'Users', 'vysosuser', 'V20Data', 'Images']:
+            some_pre_condition = False
+
+        if not re.match('\d{8}UT', self.action.args.fitsfilepath.parts[-2]):
             some_pre_condition = False
 
         # Check if a destination is set in the config file
-        
         if self.cfg['VYSOS20'].get('copy_local', None) is None:
             some_pre_condition = False
 
@@ -195,7 +205,7 @@ class CopyDataLocally(BasePrimitive):
         self.log.info(f"Running {self.__class__.__name__} action")
 
         # Try to determine date string from path to file
-        fitsfile = Path(self.action.args.kd.fitsfilepath)
+        fitsfile = self.action.args.fitsfilepath
         date_string = fitsfile.parts[-2]
 
         # Look for log file
@@ -617,9 +627,6 @@ class ExtractStars(BasePrimitive):
         mina = self.cfg['Extract'].getint('fwhm_mina', 1)
         minb = self.cfg['Extract'].getint('fwhm_minb', 1)
 
-        self.action.args.fwhm = np.nan
-        self.action.args.ellipticity = np.nan
-
         pd = self.action.args.kd.pixeldata[0]
         objects = sep.extract(pd.data, err=pd.uncertainty.array,
                               mask=pd.mask,
@@ -795,11 +802,6 @@ class GetCatalogStars(BasePrimitive):
         self.log.info(f"Running {self.__class__.__name__} action")
 
         catalogname = self.cfg['jpeg'].get('catalog')
-        catalog = {'UCAC4': 'I/322A', 'Gaia': 'I/345/gaia2'}[catalogname]
-        from astroquery.vizier import Vizier
-        v = Vizier(columns=['_RAJ2000', '_DEJ2000', 'rmag'],
-                   column_filters={"rmag":">0"})
-        v.ROW_LIMIT = 1e5
 
         fp = self.action.args.wcs.calc_footprint(axes=self.action.args.kd.pixeldata[0].data.shape)
         dra = fp[:,0].max() - fp[:,0].min()
@@ -811,8 +813,7 @@ class GetCatalogStars(BasePrimitive):
         else:
             pointing = self.action.args.header_pointing
 
-        self.action.args.catalog = v.query_region(pointing, catalog=catalog,
-                                                  radius=c.Angle(radius, "deg"))[0]
+        self.action.args.catalog = get_catalog(pointing, radius, catalog=catalogname)
         self.log.info(f"Retrieved {len(self.action.args.catalog)} catalog entries")
         self.log.info(self.action.args.catalog.keys())
 
@@ -869,7 +870,6 @@ class RenderJPEG(BasePrimitive):
 
         im = self.action.args.kd.pixeldata[0].data
         binning = self.cfg['jpeg'].getint('binning', 1)
-        jpegfilename = f'{self.action.args.kd.fitsfile.split(".")[0]}.jpg'
         vmin = np.percentile(im, self.cfg['jpeg'].getfloat('vmin_percent', 0.5))
         vmax = np.percentile(im, self.cfg['jpeg'].getfloat('vmax_percent', 99))
         dpi = self.cfg['jpeg'].getint('dpi', 72)
@@ -922,6 +922,7 @@ class RenderJPEG(BasePrimitive):
             plt.plot([x+0.6*radius, x+1.4*radius], [y, y], 'g', alpha=0.7)
 
 
+        jpegfilename = f'{self.action.args.fitsfile.split(".")[0]}.jpg'
         self.action.args.jpegfile = Path('/var/www/plots/V20/') / jpegfilename
         self.log.info(f'  Rendering: {self.action.args.jpegfile}')
         plt.xlim(0,nx)
@@ -988,7 +989,7 @@ class Record(BasePrimitive):
         self.log.info(f"Running {self.__class__.__name__} action")
 
         # Comple image info to store
-        image_info = {'filename': self.action.args.kd.fitsfile,
+        image_info = {'filename': self.action.args.fitsfile,
                       'telescope': self.action.args.kd.instrument,
                       'compressed': Path(self.action.args.kd.fitsfilename).suffix == '.fz',
                       'target name': self.action.args.kd.get('OBJECT'),
