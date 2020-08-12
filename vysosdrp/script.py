@@ -80,7 +80,7 @@ def setup_framework(args, pipeline=QuickLookPipeline):
 
 def analyze_one():
     args = _parseArguments(sys.argv)
-    p = Path(args.input).expanduser()
+    p = Path(args.input).expanduser().absolute()
     if p.exists() is False:
         print(f'Unable to find file: {p}')
         return
