@@ -50,7 +50,7 @@ class ReadFITS(BasePrimitive):
         # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
         self.cfg = self.context.config.instrument
-        # initialize values
+        # initialize values in the args for future use
         self.action.args.kd = None
         self.action.args.objects = None
         self.action.args.wcs_pointing = None
@@ -69,6 +69,21 @@ class ReadFITS(BasePrimitive):
         else:
             self.action.args.fitsfile = self.action.args.fitsfilepath.name
 
+        ## Connect to mongo
+        try:
+            import pymongo
+            self.log.debug('Connecting to mongo db')
+            self.action.args.mongoclient = pymongo.MongoClient('localhost', 27017)
+            self.action.args.images = self.mongoclient.vysos['images']
+            already_processed = [d for d in self.action.args.images.find( {'filename': self.action.args.fitsfile} )]
+            if len(already_processed) != 0 and self.cfg['VYSOS20'].getboolean('overwrite', False) is False:
+                self.log.info('  File is already in the database, skipping further processing')
+                self.action.args.skip = True
+        except:
+            self.log.error('Could not connect to mongo db')
+            self.action.args.mongoclient = None
+            self.action.args.images = None
+
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
         some_pre_condition = True
@@ -78,24 +93,6 @@ class ReadFITS(BasePrimitive):
             self.log.info(f"  File: {self.action.args.fitsfilepath}")
         else:
             self.log.info(f"  Could not find file: {self.action.args.fitsfilepath}")
-            some_pre_condition = False
-
-        # Check for mongo DB connection
-        try:
-            import pymongo
-            self.log.debug('Connecting to mongo db at 192.168.1.101')
-            self.mongoclient = pymongo.MongoClient('localhost', 27017)
-            self.images = self.mongoclient.vysos['images']
-            self.mongoclient.close()
-        except:
-            self.log.error('Could not connect to mongo db')
-            some_pre_condition = False
-
-        # Check if this exists in the database already
-        already_processed = [d for d in self.images.find( {'filename': self.action.args.fitsfile} )]
-        if len(already_processed) != 0 and self.cfg['VYSOS20'].getboolean('overwrite', False) is False:
-            self.log.info('  File is already in the database, skipping further processing')
-            self.action.args.skip = True
             some_pre_condition = False
 
         if some_pre_condition is True:
@@ -124,20 +121,13 @@ class ReadFITS(BasePrimitive):
         self.action.args.kd = fits_reader(self.action.args.fitsfilepath,
                                           datatype=VYSOS20)
 
-        # If we are reading a compressed file, use the uncompressed version of
-        # the name for the database
-#         self.action.args.kd.fitsfile = fitsfile_db
-#         self.action.args.kd.fitsfilepath = fitsfile
-
         # Read some header info
         self.action.args.obstime = datetime.strptime(self.action.args.kd.get('DATE-OBS'),
                                                      '%Y-%m-%dT%H:%M:%S')
-
         self.action.args.header_pointing = c.SkyCoord(self.action.args.kd.get('RA'),
                                                       self.action.args.kd.get('DEC'),
                                                       frame='fk5',
                                                       unit=(u.hourangle, u.deg))
-
         try:
             self.action.args.wcs = WCS(self.action.args.kd.header[0])
         except:
@@ -829,7 +819,7 @@ class GetCatalogStars(BasePrimitive):
         else:
             pointing = self.action.args.header_pointing
 
-        self.log.info(f"Retrieving {catalogname} entries (magnitude < {maglimit:.1f})")
+        self.log.info(f"Retrieving {catalogname} entries (magnitude < {maglimit})")
         self.action.args.catalog = get_catalog(pointing, radius, catalog=catalogname, maglimit=maglimit)
         self.log.info(f"  Found {len(self.action.args.catalog)} catalog entries")
 
@@ -917,7 +907,7 @@ class RenderJPEG(BasePrimitive):
                                                       self.action.args.catalog['DEC'], 1)
             for xy in zip(x, y):
                 if xy[0] > 0 and xy[0] < nx and xy[1] > 0 and xy[1] < ny:
-                    c = plt.Circle(xy, radius=radius, edgecolor='b', facecolor='none')
+                    c = plt.Circle(xy, radius=radius, edgecolor='g', facecolor='none')
                     ax.add_artist(c)
 
         if self.cfg['jpeg'].getboolean('overplot_pointing', False) is True\
@@ -974,15 +964,10 @@ class Record(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = (not self.action.args.skip) and (not self.cfg['VYSOS20'].getboolean('norecord', False))
-        try:
-            import pymongo
-            self.log.debug('Connecting to mongo db at 192.168.1.101')
-            self.mongoclient = pymongo.MongoClient('192.168.1.101', 27017)
-            self.images = self.mongoclient.vysos['images']
-        except:
-            self.log.error('Could not connect to mongo db')
-            some_pre_condition = False
+        some_pre_condition = (not self.action.args.skip)\
+                         and (not self.cfg['VYSOS20'].getboolean('norecord', False))
+                         and (self.action.args.images is not None)
+
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
         else:
@@ -1035,20 +1020,20 @@ class Record(BasePrimitive):
             self.log.debug(f'  {key}: {image_info[key]}')
 
         # Remove old entries for this image file
-        deletion = self.images.delete_many( {'filename': self.action.args.kd.fitsfilename} )
+        deletion = self.action.args.images.delete_many( {'filename': self.action.args.kd.fitsfilename} )
         self.log.debug(f'  Deleted {deletion.deleted_count} previous entries for {self.action.args.kd.fitsfilename}')
 
         # Save new entry for this image file
         self.log.debug('Adding image info to mongo database')
         ## Save document
         try:
-            inserted_id = self.images.insert_one(image_info).inserted_id
+            inserted_id = self.action.args.images.insert_one(image_info).inserted_id
             self.log.debug(f"  Inserted document id: {inserted_id}")
         except:
             e = sys.exc_info()[0]
             self.log.error('Failed to add new document')
             self.log.error(e)
-        self.mongoclient.close()
+        self.action.args.mongoclient.close()
 
         return self.action.args
 
