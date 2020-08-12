@@ -31,5 +31,23 @@ def get_catalog(pointing, radius, catalog='UCAC4', maglimit=None):
     return stars
 
 
-def get_moon_info(lat, lon, height, temperature, pressure, time):
-    loc = None
+def get_moon_info(lat=lat, lon=lon, height=height, temperature=temperature,
+                  pressure=pressure, time=time, pointing=pointing):
+    loc = c.EarthLocation(lon, lat, height)
+    altazframe = c.AltAz(location=loc, obstime=time,
+                         temperature=tmperature,
+                         pressure=pressure)
+    moon = c.get_moon(Time(time), location=loc)
+    sun = c.get_sun(Time(time))
+
+    moon_alt = ((moon.transform_to(altazframe).alt).to(u.degree)).value
+    moon_separation = (moon.separation(pointing).to(u.degree)).value
+
+    # Moon illumination formula from Meeus, “Astronomical 
+    # Algorithms". Formulae 46.1 and 46.2 in the 1991 edition, 
+    # using the approximation cos(psi) \approx -cos(i). Error 
+    # should be no more than 0.0014 (p. 316). 
+    moon_illum = 50*(1 - np.sin(sun.dec.radian)*np.sin(moon.dec.radian)\
+                 - np.cos(sun.dec.radian)*np.cos(moon.dec.radian)\
+                 * np.cos(sun.ra.radian-moon.ra.radian))
+    return moon_alt, moon_separation, moon_illum

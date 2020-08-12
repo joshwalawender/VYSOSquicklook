@@ -279,35 +279,13 @@ class MoonInfo(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
 
-        self.lat = c.Latitude(self.action.args.kd.get('SITELAT'), unit=u.degree)
-        self.lon = c.Longitude(self.action.args.kd.get('SITELONG'), unit=u.degree)
-        self.height = float(self.action.args.kd.get('ALT-OBS')) * u.meter
-        self.loc = c.EarthLocation(self.lon, self.lat, self.height)
-        tmperature = float(self.action.args.kd.get('AMBTEMP'))*u.Celsius
-        press = self.cfg['VYSOS20'].getfloat('pressure', 700)*u.mbar
-        self.action.args.altazframe = c.AltAz(location=self.loc,
-                          obstime=self.action.args.obstime,
-                          temperature=tmperature,
-                          pressure=press)
-        self.action.args.moon = c.get_moon(Time(self.action.args.obstime),
-                                           location=self.loc)
-
-        self.action.args.sun = c.get_sun(Time(self.action.args.obstime))
-
-        self.action.args.moon_alt = ((self.action.args.moon.transform_to(self.action.args.altazframe).alt).to(u.degree)).value
-        self.action.args.moon_separation = (self.action.args.moon.separation(self.action.args.header_pointing).to(u.degree)).value
-
-        # Moon illumination formula from Meeus, “Astronomical 
-        # Algorithms". Formulae 46.1 and 46.2 in the 1991 edition, 
-        # using the approximation cos(psi) \approx -cos(i). Error 
-        # should be no more than 0.0014 (p. 316). 
-        dec_sun = self.action.args.sun.dec.radian
-        dec_moon = self.action.args.moon.dec.radian
-        ra_sun = self.action.args.sun.ra.radian
-        ra_moon = self.action.args.moon.ra.radian
-        self.action.args.moon_illum = 50*(1 - np.sin(dec_sun)*np.sin(dec_moon)\
-                                      - np.cos(dec_sun)*np.cos(dec_moon)\
-                                      * np.cos(ra_sun-ra_moon))
+        get_moon_info(lat=c.Latitude(self.action.args.kd.get('SITELAT'), unit=u.degree),
+                      lon=c.Longitude(self.action.args.kd.get('SITELONG'), unit=u.degree),
+                      height=float(self.action.args.kd.get('ALT-OBS')) * u.meter,
+                      temperature=float(self.action.args.kd.get('AMBTEMP'))*u.Celsius,
+                      pressure=self.cfg['VYSOS20'].getfloat('pressure', 700)*u.mbar,
+                      time=self.action.args.obstime,
+                      pointing=self.action.args.header_pointing)
 
         return self.action.args
 
