@@ -51,6 +51,7 @@ class ReadFITS(BasePrimitive):
         self.log = context.pipeline_logger
         self.cfg = self.context.config.instrument
         # initialize values
+        self.action.args.kd = None
         self.action.args.objects = None
         self.action.args.wcs_pointing = None
         self.action.args.perr = np.nan
@@ -59,7 +60,7 @@ class ReadFITS(BasePrimitive):
         self.action.args.skip = False
         self.action.args.fwhm = np.nan
         self.action.args.ellipticity = np.nan
-        self.action.args.fitsfilepath = Path(self.action.args.name).expanduser()
+        self.action.args.fitsfilepath = Path(self.action.args.name).expanduser().absolute()
 
         # If we are reading a compressed file, use the uncompressed version of
         # the name for the database
@@ -105,11 +106,12 @@ class ReadFITS(BasePrimitive):
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
-        some_post_condition = True
+        some_post_condition = self.action.args.kd is not None
         if some_post_condition is True:
             self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
         else:
             self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+            self.action.args.skip = True
         return some_post_condition
 
     def _perform(self):
@@ -730,11 +732,24 @@ class SolveAstrometry(BasePrimitive):
             self.log.debug(f"  Running astrometry.net solve")
             wcs_header = ast.solve_from_source_list(stars['x'], stars['y'],
                                                     nx, ny,
-                                                    solve_timeout=solve_timeout)
-            self.log.debug(f"  done")
+                                                    solve_timeout=solve_timeout,
+                                                    center_dec=self.action.args.header_pointing.dec.deg,
+                                                    center_ra=self.action.args.header_pointing.ra.deg,
+                                                    radius=0.8,
+                                                    scale_est=0.44,
+                                                    scale_err=0.02,
+                                                    scale_units='arcsecperpix',
+                                                    tweak_order=2,
+                                                    )
         except astrometryTimeout as e:
             self.log.warning('Astrometry solve timed out')
             return self.action.args
+
+        if wcs_header == {}:
+            self.log.info(f"  Solve failed")
+            return self.action.args
+
+        self.log.info(f"  Solve complete")
 
         # Determine Pointing
         self.action.args.wcs = WCS(wcs_header)
@@ -802,6 +817,7 @@ class GetCatalogStars(BasePrimitive):
         self.log.info(f"Running {self.__class__.__name__} action")
 
         catalogname = self.cfg['jpeg'].get('catalog')
+        maglimit = self.cfg['jpeg'].get('catalog_maglimit')
 
         fp = self.action.args.wcs.calc_footprint(axes=self.action.args.kd.pixeldata[0].data.shape)
         dra = fp[:,0].max() - fp[:,0].min()
@@ -813,9 +829,9 @@ class GetCatalogStars(BasePrimitive):
         else:
             pointing = self.action.args.header_pointing
 
-        self.action.args.catalog = get_catalog(pointing, radius, catalog=catalogname)
-        self.log.info(f"Retrieved {len(self.action.args.catalog)} catalog entries")
-        self.log.info(self.action.args.catalog.keys())
+        self.log.info(f"Retrieving {catalogname} entries (magnitude < {maglimit:.1f})")
+        self.action.args.catalog = get_catalog(pointing, radius, catalog=catalogname, maglimit=maglimit)
+        self.log.info(f"  Found {len(self.action.args.catalog)} catalog entries")
 
         return self.action.args
 
@@ -897,8 +913,8 @@ class RenderJPEG(BasePrimitive):
         if self.cfg['jpeg'].getboolean('overplot_catalog', False) is True and self.action.args.catalog is not None:
             self.log.info('  Overlaying catalog stars')
             radius = self.cfg['jpeg'].getfloat('catalog_radius', 6)
-            x, y = self.action.args.wcs.all_world2pix(self.action.args.catalog['_RAJ2000'],
-                                                      self.action.args.catalog['_DEJ2000'], 1)
+            x, y = self.action.args.wcs.all_world2pix(self.action.args.catalog['RA'],
+                                                      self.action.args.catalog['DEC'], 1)
             for xy in zip(x, y):
                 if xy[0] > 0 and xy[0] < nx and xy[1] > 0 and xy[1] < ny:
                     c = plt.Circle(xy, radius=radius, edgecolor='b', facecolor='none')
@@ -907,12 +923,12 @@ class RenderJPEG(BasePrimitive):
         if self.cfg['jpeg'].getboolean('overplot_pointing', False) is True\
             and self.action.args.header_pointing is not None\
             and self.action.args.wcs_pointing is not None:
+            radius = self.cfg['jpeg'].getfloat('pointing_radius', 6)
             x, y = self.action.args.wcs.all_world2pix(self.action.args.header_pointing.ra.degree,
                                                       self.action.args.header_pointing.dec.degree, 1)
-            plt.plot([0,nx], [ny/2,ny/2], 'y-', alpha=0.7)
-            plt.plot([nx/2, nx/2], [0,ny], 'y-', alpha=0.7)
+            plt.plot([nx/2-radius,nx/2+radius], [ny/2,ny/2], 'y-', alpha=0.7)
+            plt.plot([nx/2, nx/2], [ny/2-radius,ny/2+radius], 'y-', alpha=0.7)
             # Draw crosshair on target
-            radius = self.cfg['jpeg'].getfloat('pointing_radius', 6)
             c = plt.Circle((x, y), radius=radius, edgecolor='g', alpha=0.7,
                            facecolor='none')
             ax.add_artist(c)
