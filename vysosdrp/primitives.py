@@ -24,7 +24,7 @@ from keckdata import fits_reader, VYSOS20
 from keckdrpframework.primitives.base_primitive import BasePrimitive
 from keckdrpframework.models.arguments import Arguments
 
-from .tools import get_catalog
+from .tools import get_catalog, get_moon_info
 
 
 ##-----------------------------------------------------------------------------
@@ -49,6 +49,7 @@ class ReadFITS(BasePrimitive):
         BasePrimitive.__init__(self, action, context)
         # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
+        self.log.info(f"Initializing {self.__class__.__name__}")
         self.cfg = self.context.config.instrument
         # initialize values in the args for future use
         self.action.args.kd = None
@@ -74,15 +75,18 @@ class ReadFITS(BasePrimitive):
             import pymongo
             self.log.debug('Connecting to mongo db')
             self.action.args.mongoclient = pymongo.MongoClient('localhost', 27017)
-            self.action.args.images = self.mongoclient.vysos['images']
-            already_processed = [d for d in self.action.args.images.find( {'filename': self.action.args.fitsfile} )]
-            if len(already_processed) != 0 and self.cfg['VYSOS20'].getboolean('overwrite', False) is False:
-                self.log.info('  File is already in the database, skipping further processing')
-                self.action.args.skip = True
+            self.action.args.images = self.action.args.mongoclient.vysos['images']
         except:
             self.log.error('Could not connect to mongo db')
             self.action.args.mongoclient = None
             self.action.args.images = None
+
+        if self.action.args.images is not None:
+            already_processed = [d for d in self.action.args.images.find( {'filename': self.action.args.fitsfile} )]
+            if len(already_processed) != 0 and self.cfg['VYSOS20'].getboolean('overwrite', False) is False:
+                self.log.info('  File is already in the database, skipping further processing')
+                self.action.args.skip = True
+
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
@@ -98,7 +102,7 @@ class ReadFITS(BasePrimitive):
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} satisfied")
         else:
-            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
         return some_pre_condition
 
     def _post_condition(self):
@@ -178,7 +182,7 @@ class CopyDataLocally(BasePrimitive):
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
         else:
-            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
         return some_pre_condition
 
     def _post_condition(self):
@@ -261,7 +265,7 @@ class MoonInfo(BasePrimitive):
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
         else:
-            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
         return some_pre_condition
 
     def _post_condition(self):
@@ -279,13 +283,17 @@ class MoonInfo(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
 
-        get_moon_info(lat=c.Latitude(self.action.args.kd.get('SITELAT'), unit=u.degree),
-                      lon=c.Longitude(self.action.args.kd.get('SITELONG'), unit=u.degree),
-                      height=float(self.action.args.kd.get('ALT-OBS')) * u.meter,
-                      temperature=float(self.action.args.kd.get('AMBTEMP'))*u.Celsius,
-                      pressure=self.cfg['VYSOS20'].getfloat('pressure', 700)*u.mbar,
-                      time=self.action.args.obstime,
-                      pointing=self.action.args.header_pointing)
+        alt, sep, illum = get_moon_info(
+                  lat=c.Latitude(self.action.args.kd.get('SITELAT'), unit=u.degree),
+                  lon=c.Longitude(self.action.args.kd.get('SITELONG'), unit=u.degree),
+                  height=float(self.action.args.kd.get('ALT-OBS')) * u.meter,
+                  temperature=float(self.action.args.kd.get('AMBTEMP'))*u.Celsius,
+                  pressure=self.cfg['VYSOS20'].getfloat('pressure', 700)*u.mbar,
+                  time=self.action.args.obstime,
+                  pointing=self.action.args.header_pointing)
+        self.action.args.moon_alt = alt
+        self.action.args.moon_separation = sep
+        self.action.args.moon_illum = illum
 
         return self.action.args
 
@@ -321,7 +329,7 @@ class GainCorrect(BasePrimitive):
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
         else:
-            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
         return some_pre_condition
 
     def _post_condition(self):
@@ -385,7 +393,7 @@ class CreateDeviation(BasePrimitive):
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
         else:
-            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
         return some_pre_condition
 
     def _post_condition(self):
@@ -459,7 +467,7 @@ class MakeSourceMask(BasePrimitive):
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
         else:
-            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
         return some_pre_condition
 
     def _post_condition(self):
@@ -515,7 +523,7 @@ class SubtractBackground(BasePrimitive):
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
         else:
-            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
         return some_pre_condition
 
     def _post_condition(self):
@@ -574,7 +582,7 @@ class ExtractStars(BasePrimitive):
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
         else:
-            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
         return some_pre_condition
 
     def _post_condition(self):
@@ -669,7 +677,7 @@ class SolveAstrometry(BasePrimitive):
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
         else:
-            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
         return some_pre_condition
 
     def _post_condition(self):
@@ -766,7 +774,7 @@ class GetCatalogStars(BasePrimitive):
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
         else:
-            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
         return some_pre_condition
 
     def _post_condition(self):
@@ -834,7 +842,7 @@ class RenderJPEG(BasePrimitive):
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
         else:
-            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
         return some_pre_condition
 
     def _post_condition(self):
@@ -949,7 +957,9 @@ class Record(BasePrimitive):
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
         else:
-            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
+            self.log.info('Done')
+            print()
         return some_pre_condition
 
     def _post_condition(self):
@@ -959,6 +969,9 @@ class Record(BasePrimitive):
             self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
         else:
             self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        self.log.info('Done')
+        print()
+
         return some_post_condition
 
     def _perform(self):
@@ -968,7 +981,7 @@ class Record(BasePrimitive):
         self.log.info(f"Running {self.__class__.__name__} action")
 
         # Comple image info to store
-        image_info = {'filename': self.action.args.fitsfile,
+        self.image_info = {'filename': self.action.args.fitsfile,
                       'telescope': self.action.args.kd.instrument,
                       'compressed': Path(self.action.args.kd.fitsfilename).suffix == '.fz',
                       'target name': self.action.args.kd.get('OBJECT'),
@@ -990,12 +1003,11 @@ class Record(BasePrimitive):
                       'SIDREversion': 'n/a',
                      }
         if self.action.args.perr is not None and not np.isnan(self.action.args.perr):
-            image_info['perr_arcmin'] = self.action.args.perr.to(u.arcmin).value
+            self.image_info['perr_arcmin'] = self.action.args.perr.to(u.arcmin).value
         if self.action.args.jpegfile is not None:
-            image_info['jpegs'] = [f"{self.action.args.jpegfile.name}"]
-
-        for key in image_info.keys():
-            self.log.debug(f'  {key}: {image_info[key]}')
+            self.image_info['jpegs'] = [f"{self.action.args.jpegfile.name}"]
+        for key in self.image_info.keys():
+            self.log.info(f'  {key}: {self.image_info[key]}')
 
         # Remove old entries for this image file
         deletion = self.action.args.images.delete_many( {'filename': self.action.args.kd.fitsfilename} )
@@ -1005,7 +1017,7 @@ class Record(BasePrimitive):
         self.log.debug('Adding image info to mongo database')
         ## Save document
         try:
-            inserted_id = self.action.args.images.insert_one(image_info).inserted_id
+            inserted_id = self.action.args.images.insert_one(self.image_info).inserted_id
             self.log.debug(f"  Inserted document id: {inserted_id}")
         except:
             e = sys.exc_info()[0]
@@ -1042,7 +1054,7 @@ class UpdateDirectory(BasePrimitive):
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
         else:
-            self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
         return some_pre_condition
 
     def _post_condition(self):
@@ -1108,7 +1120,7 @@ class UpdateDirectory(BasePrimitive):
 #         if some_pre_condition is True:
 #             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
 #         else:
-#             self.log.debug(f"Precondition for {self.__class__.__name__} failed")
+#             self.log.warning(f"Precondition for {self.__class__.__name__} failed")
 #         return some_pre_condition
 # 
 #     def _post_condition(self):

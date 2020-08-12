@@ -1,4 +1,6 @@
+import numpy as np
 from astropy import units as u
+from astropy.time import Time
 from astropy.table import Table, Column
 import astropy.coordinates as c
 from astroquery.vizier import Vizier
@@ -31,17 +33,17 @@ def get_catalog(pointing, radius, catalog='UCAC4', maglimit=None):
     return stars
 
 
-def get_moon_info(lat=lat, lon=lon, height=height, temperature=temperature,
-                  pressure=pressure, time=time, pointing=pointing):
+def get_moon_info(lat=None, lon=None, height=None, temperature=None,
+                  pressure=None, time=None, pointing=None):
     loc = c.EarthLocation(lon, lat, height)
     altazframe = c.AltAz(location=loc, obstime=time,
-                         temperature=tmperature,
+                         temperature=temperature,
                          pressure=pressure)
     moon = c.get_moon(Time(time), location=loc)
     sun = c.get_sun(Time(time))
 
     moon_alt = ((moon.transform_to(altazframe).alt).to(u.degree)).value
-    moon_separation = (moon.separation(pointing).to(u.degree)).value
+    moon_separation = (moon.separation(pointing).to(u.degree)).value if pointing is not None else None
 
     # Moon illumination formula from Meeus, “Astronomical 
     # Algorithms". Formulae 46.1 and 46.2 in the 1991 edition, 
