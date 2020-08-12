@@ -944,7 +944,7 @@ class Record(BasePrimitive):
         """Check for conditions necessary to run this process"""
         some_pre_condition = (not self.action.args.skip)\
                          and (not self.cfg['VYSOS20'].getboolean('norecord', False))\
-                         and (self.action.args.images is not None):
+                         and (self.action.args.images is not None)
 
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
