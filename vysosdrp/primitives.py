@@ -13,8 +13,6 @@ from astropy.time import Time
 import astropy.coordinates as c
 from astropy.wcs import WCS
 from astropy.table import Table, Column
-from astroquery.exceptions import TimeoutError as astrometryTimeout
-from astroquery.astrometry_net import AstrometryNet
 import ccdproc
 import photutils
 import sep
@@ -25,6 +23,7 @@ from keckdrpframework.primitives.base_primitive import BasePrimitive
 from keckdrpframework.models.arguments import Arguments
 
 from .tools import get_catalog, get_moon_info
+from .vysos_plotting import generate_report
 
 
 ##-----------------------------------------------------------------------------
@@ -52,6 +51,7 @@ class ReadFITS(BasePrimitive):
         self.log.info(f"Initializing {self.__class__.__name__}")
         self.cfg = self.context.config.instrument
         # initialize values in the args for future use
+        self.action.args.db_entry = None
         self.action.args.kd = None
         self.action.args.objects = None
         self.action.args.wcs_pointing = None
@@ -61,6 +61,7 @@ class ReadFITS(BasePrimitive):
         self.action.args.skip = False
         self.action.args.fwhm = np.nan
         self.action.args.ellipticity = np.nan
+        self.action.args.zero_point = np.nan
         self.action.args.fitsfilepath = Path(self.action.args.name).expanduser().absolute()
 
         # If we are reading a compressed file, use the uncompressed version of
@@ -81,12 +82,6 @@ class ReadFITS(BasePrimitive):
             self.action.args.mongoclient = None
             self.action.args.images = None
 
-        if self.action.args.images is not None:
-            already_processed = [d for d in self.action.args.images.find( {'filename': self.action.args.fitsfile} )]
-            if len(already_processed) != 0 and self.cfg['VYSOS20'].getboolean('overwrite', False) is False:
-                self.log.info('  File is already in the database, skipping further processing')
-                self.action.args.skip = True
-
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
@@ -98,6 +93,19 @@ class ReadFITS(BasePrimitive):
         else:
             self.log.info(f"  Could not find file: {self.action.args.fitsfilepath}")
             some_pre_condition = False
+
+        if self.action.args.images is not None:
+            already_processed = [d for d in self.action.args.images.find( {'filename': self.action.args.fitsfile} )]
+            if len(already_processed) != 0\
+               and self.cfg['VYSOS20'].getboolean('overwrite', False) is False\
+               and self.action.args.overwrite is False:
+                self.log.info('  File is already in the database, skipping further processing')
+                self.action.args.skip = True
+            if len(already_processed) != 0:
+                self.action.args.db_entry = already_processed[0]
+                if self.action.args.db_entry.get('wcs', None) is not None:
+                    self.action.args.wcs = WCS(self.action.args.db_entry.get('wcs'))
+                    self.log.info('Found Previously Solved WCS')
 
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} satisfied")
@@ -132,12 +140,6 @@ class ReadFITS(BasePrimitive):
                                                       self.action.args.kd.get('DEC'),
                                                       frame='fk5',
                                                       unit=(u.hourangle, u.deg))
-        try:
-            self.action.args.wcs = WCS(self.action.args.kd.header[0])
-        except:
-            self.log.debug('Unable to read WCS from header')
-            pass
-
         return self.action.args
 
 
@@ -599,6 +601,36 @@ class ExtractStars(BasePrimitive):
         Returns an Argument() with the parameters that depends on this operation.
         """
         self.log.info(f"Running {self.__class__.__name__} action")
+
+        # Photutils StarFinder
+#         extract_fwhm = self.cfg['Extract'].getfloat('extract_fwhm', 5)
+#         thresh = self.cfg['Extract'].getint('extract_threshold', 9)
+#         pixel_scale = self.cfg['VYSOS20'].getfloat('pixel_scale', 1)
+#         pd = self.action.args.kd.pixeldata[0]
+#         mean, median, std = stats.sigma_clipped_stats(pd.data, sigma=3.0)
+#         # daofind = photutils.DAOStarFinder(fwhm=extract_fwhm, threshold=thresh*std)  
+#         starfind = photutils.IRAFStarFinder(thresh*std, extract_fwhm)  
+#         sources = starfind(pd.data)
+#         self.log.info(f'  Found {len(sources):d} stars')
+#         self.log.info(sources.keys())
+# 
+#         self.action.args.objects = sources
+#         self.action.args.objects.sort('flux')
+#         self.action.args.objects.reverse()
+#         self.action.args.n_objects = len(sources)
+#         if self.action.args.n_objects == 0:
+#             self.log.warning('No stars found')
+#             self.action.args.fwhm = np.nan
+#             self.action.args.ellipticity = np.nan
+#         else:
+#             FWHM_pix = np.median(sources['fwhm'])
+#             roundness = np.median(sources['roundness'])
+#             self.log.info(f'  Median FWHM = {FWHM_pix:.1f} pix ({FWHM_pix*pixel_scale:.2f} arcsec)')
+#             self.log.info(f'  roundness = {roundness:.2f}')
+#             self.action.args.fwhm = FWHM_pix
+#             self.action.args.ellipticity = np.nan
+
+        # Source Extractor
         pixel_scale = self.cfg['VYSOS20'].getfloat('pixel_scale', 1)
         thresh = self.cfg['Extract'].getint('extract_threshold', 9)
         minarea = self.cfg['Extract'].getint('extract_minarea', 7)
@@ -624,7 +656,7 @@ class ExtractStars(BasePrimitive):
 
         filtered = (t['a'] < mina) | (t['b'] < minb) | (t['flag'] > 0)
         self.log.debug(f'  Removing {np.sum(filtered):d}/{len(filtered):d}'\
-                      f' extractions from FWHM calculation')
+                       f' extractions from FWHM calculation')
         self.action.args.n_objects = len(t[~filtered])
         self.log.info(f'  Found {self.action.args.n_objects:d} stars')
 
@@ -643,6 +675,16 @@ class ExtractStars(BasePrimitive):
             self.log.info(f'  ellipticity = {ellipticity:.2f}')
             self.action.args.fwhm = FWHM_pix
             self.action.args.ellipticity = ellipticity
+
+        ## Do second photometry measurement
+        positions = [(det['x'], det['y']) for det in self.action.args.objects[0:5]]
+        apertures = photutils.CircularAperture(positions, 5)
+        phot_table = photutils.aperture_photometry(pd.data, apertures)
+#         for i,entry in enumerate(phot_table):
+#             self.log.info(phot_table[i]['aperture_sum'])
+#             self.log.info(self.action.args.objects[i]['flux'])
+#             self.log.info(self.action.args.objects[i]['flux'] / phot_table[i]['aperture_sum'])
+
 
         return self.action.args
 
@@ -674,6 +716,20 @@ class SolveAstrometry(BasePrimitive):
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
         some_pre_condition = not self.action.args.skip
+
+        if (self.action.args.wcs is not None) and (self.cfg['VYSOS20'].getboolean('force_solve', False) is False):
+            self.log.info('Found existing wcs, skipping solve')
+            nx, ny = self.action.args.kd.pixeldata[0].data.shape
+            r, d = self.action.args.wcs.all_pix2world([nx/2.], [ny/2.], 1)
+            self.action.args.wcs_pointing = c.SkyCoord(r[0], d[0], frame='fk5',
+                                              equinox='J2000',
+                                              unit=(u.deg, u.deg),
+                                              obstime=self.action.args.obstime)
+            self.action.args.perr = self.action.args.wcs_pointing.separation(
+                                         self.action.args.header_pointing)
+            self.log.info(f'Pointing error = {self.action.args.perr.to(u.arcmin):.1f}')
+            some_pre_condition = False
+
         if some_pre_condition is True:
             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
         else:
@@ -694,6 +750,9 @@ class SolveAstrometry(BasePrimitive):
         Returns an Argument() with the parameters that depends on this operation.
         """
         self.log.info(f"Running {self.__class__.__name__} action")
+        from astroquery.exceptions import TimeoutError as astrometryTimeout
+        from astroquery.astrometry_net import AstrometryNet
+
         ast = AstrometryNet()
         ast.api_key = self.cfg['astrometry'].get('api_key', None)
         solve_timeout = self.cfg['astrometry'].getint('solve_timeout', 90)
@@ -720,15 +779,21 @@ class SolveAstrometry(BasePrimitive):
         except astrometryTimeout as e:
             self.log.warning('Astrometry solve timed out')
             return self.action.args
+        except Exception as e:
+            self.log.warning('Astrometry solve failed')
+            self.log.warning(e)
+            return self.action.args
 
         if wcs_header == {}:
             self.log.info(f"  Solve failed")
             return self.action.args
 
         self.log.info(f"  Solve complete")
-
-        # Determine Pointing
+        self.action.args.wcs_header = wcs_header
         self.action.args.wcs = WCS(wcs_header)
+
+        # Determine Pointing Error
+#         pixel_scale = np.mean(proj_plane_pixel_scales(self.action.args.wcs))*60*60
         r, d = self.action.args.wcs.all_pix2world([nx/2.], [ny/2.], 1)
         self.action.args.wcs_pointing = c.SkyCoord(r[0], d[0], frame='fk5',
                                           equinox='J2000',
@@ -801,13 +866,119 @@ class GetCatalogStars(BasePrimitive):
         radius = np.sqrt((dra*np.cos(fp[:,1].mean()*np.pi/180.))**2 + ddec**2)/2.
 
         if self.action.args.wcs_pointing is not None:
+            self.log.debug('Using WCS pointing for catalog query')
             pointing = self.action.args.wcs_pointing
         else:
+            self.log.warning('Using header pointing for catalog query')
             pointing = self.action.args.header_pointing
 
         self.log.info(f"Retrieving {catalogname} entries (magnitude < {maglimit})")
         self.action.args.catalog = get_catalog(pointing, radius, catalog=catalogname, maglimit=maglimit)
         self.log.info(f"  Found {len(self.action.args.catalog)} catalog entries")
+
+        return self.action.args
+
+
+
+##-----------------------------------------------------------------------------
+## Primitive: AssociateCatalogStars
+##-----------------------------------------------------------------------------
+class AssociateCatalogStars(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        """
+        Constructor
+        """
+        BasePrimitive.__init__(self, action, context)
+        # to use the pipeline logger instead of the framework logger, use this:
+        self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        some_pre_condition = not self.action.args.skip
+
+        min_stars = 20
+
+        if self.action.args.objects is None:
+            some_pre_condition = False
+        elif len(self.action.args.objects) < min_stars:
+            some_pre_condition = False
+
+        if self.action.args.catalog is None:
+            some_pre_condition = False
+        elif len(self.action.args.catalog) < min_stars:
+            some_pre_condition = False
+
+        if some_pre_condition is True:
+            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
+        else:
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        some_post_condition = True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
+        else:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+
+        exptime = float(self.action.args.kd.get('EXPTIME'))
+
+        assoc_threshold = 1*u.arcsec
+        associated = Table(names=('RA', 'DEC', 'x', 'y', 'assoc_distance', 'mag', 'flux', 'instmag'),
+                           dtype=('f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8') )
+
+        catalog_coords = c.SkyCoord(self.action.args.catalog['RA'], self.action.args.catalog['DEC'])
+        for detected in self.action.args.objects:
+            ra_deg, dec_deg = self.action.args.wcs.all_pix2world(detected['x'], detected['y'], 1)
+            detected_coord = c.SkyCoord(ra_deg, dec_deg, frame='fk5', unit=(u.deg, u.deg))
+            idx, d2d, d3d = detected_coord.match_to_catalog_sky(catalog_coords)
+            if d2d[0].to(u.arcsec) < assoc_threshold.to(u.arcsec):
+                associated.add_row( {'RA': self.action.args.catalog[idx]['RA'],
+                                     'DEC': self.action.args.catalog[idx]['DEC'],
+                                     'x': detected['x'],
+                                     'y': detected['y'],
+                                     'assoc_distance': d2d[0].to(u.arcsec).value, 
+                                     'mag': self.action.args.catalog[idx]['mag'],
+                                     'flux': detected['flux'],
+                                     'instmag': -2.512*np.log(detected['flux']/exptime)
+                                     } )
+        self.action.args.associated = associated if len(associated) > 0 else None
+        self.log.info(f'Associated {len(associated)} catalogs stars')
+
+        diffs = associated['instmag'] - associated['mag']
+        zp, zp_med, zp_std = stats.sigma_clipped_stats(diffs, sigma=5.0, iters=3)
+        self.log.info(f'  Zero Point (mean) = {zp:.2f}')
+        self.log.info(f'  Zero Point (median) = {zp_med:.2f}')
+        self.log.info(f'  Zero Point (std dev) = {zp_std:.2f}')
+        self.log.info(f'  Zero Point Uncertainty = {zp_std/len(diffs)**0.5:.2f}')
+        self.action.args.zero_point = zp
+
+#         from astropy.modeling import models, fitting
+#         fit = fitting.LinearLSQFitter()
+#         line_init = models.Linear1D()
+#         fitted_line = fit(line_init, associated['mag'], associated['instmag'])
+#         self.log.info(fitted_line)
+#         self.action.args.zero_point_fit = fitted_line
 
         return self.action.args
 
@@ -860,66 +1031,17 @@ class RenderJPEG(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
 
-        im = self.action.args.kd.pixeldata[0].data
-        binning = self.cfg['jpeg'].getint('binning', 1)
-        vmin = np.percentile(im, self.cfg['jpeg'].getfloat('vmin_percent', 0.5))
-        vmax = np.percentile(im, self.cfg['jpeg'].getfloat('vmax_percent', 99))
-        dpi = self.cfg['jpeg'].getint('dpi', 72)
-        nx, ny = im.shape
-        sx = nx/dpi/binning
-        sy = ny/dpi/binning
-        fig = plt.figure(figsize=(sx, sy), dpi=dpi)
-        ax = fig.gca()
-        mdata = np.ma.MaskedArray(im)
-        palette = plt.cm.gray
-#         palette.set_bad('r', 1.0)
-        plt.imshow(mdata, cmap=palette, vmin=vmin, vmax=vmax)
-        plt.xticks([])
-        plt.yticks([])
-
-        if self.cfg['jpeg'].getboolean('overplot_extracted', False) is True and self.action.args.objects is not None:
-            self.log.info('  Overlaying extracted stars')
-            radius = self.cfg['jpeg'].getfloat('extracted_radius', 6)
-            for star in self.action.args.objects:
-                if star['x'] > 0 and star['x'] < nx and star['y'] > 0 and star['y'] < ny:
-                    c = plt.Circle((star['x'], star['y']), radius=radius,
-                                   edgecolor='r', facecolor='none')
-                    ax.add_artist(c)
-
-        if self.cfg['jpeg'].getboolean('overplot_catalog', False) is True and self.action.args.catalog is not None:
-            self.log.info('  Overlaying catalog stars')
-            radius = self.cfg['jpeg'].getfloat('catalog_radius', 6)
-            x, y = self.action.args.wcs.all_world2pix(self.action.args.catalog['RA'],
-                                                      self.action.args.catalog['DEC'], 1)
-            for xy in zip(x, y):
-                if xy[0] > 0 and xy[0] < nx and xy[1] > 0 and xy[1] < ny:
-                    c = plt.Circle(xy, radius=radius, edgecolor='g', facecolor='none')
-                    ax.add_artist(c)
-
-        if self.cfg['jpeg'].getboolean('overplot_pointing', False) is True\
-            and self.action.args.header_pointing is not None\
-            and self.action.args.wcs_pointing is not None:
-            radius = self.cfg['jpeg'].getfloat('pointing_radius', 6)
-            x, y = self.action.args.wcs.all_world2pix(self.action.args.header_pointing.ra.degree,
-                                                      self.action.args.header_pointing.dec.degree, 1)
-            plt.plot([nx/2-radius,nx/2+radius], [ny/2,ny/2], 'y-', alpha=0.7)
-            plt.plot([nx/2, nx/2], [ny/2-radius,ny/2+radius], 'y-', alpha=0.7)
-            # Draw crosshair on target
-            c = plt.Circle((x, y), radius=radius, edgecolor='g', alpha=0.7,
-                           facecolor='none')
-            ax.add_artist(c)
-            plt.plot([x, x], [y+0.6*radius, y+1.4*radius], 'g', alpha=0.7)
-            plt.plot([x, x], [y-0.6*radius, y-1.4*radius], 'g', alpha=0.7)
-            plt.plot([x-0.6*radius, x-1.4*radius], [y, y], 'g', alpha=0.7)
-            plt.plot([x+0.6*radius, x+1.4*radius], [y, y], 'g', alpha=0.7)
-
-
-        jpegfilename = f'{self.action.args.fitsfile.split(".")[0]}.jpg'
-        self.action.args.jpegfile = Path('/var/www/plots/V20/') / jpegfilename
-        self.log.info(f'  Rendering: {self.action.args.jpegfile}')
-        plt.xlim(0,nx)
-        plt.ylim(0,ny)
-        plt.savefig(self.action.args.jpegfile, dpi=dpi)
+        self.action.args.jpegfile = generate_report(
+                              self.action.args.kd.pixeldata[0].data,
+                              self.action.args.wcs,
+                              fitsfile=self.action.args.fitsfile,
+                              cfg=self.cfg,
+                              objects=self.action.args.objects,
+                              catalog=self.action.args.catalog,
+                              associated=self.action.args.associated,
+                              header_pointing=self.action.args.header_pointing,
+                              wcs_pointing=self.action.args.wcs_pointing,
+                              )
 
         return self.action.args
 
@@ -1004,10 +1126,12 @@ class Record(BasePrimitive):
                      }
         if self.action.args.perr is not None and not np.isnan(self.action.args.perr):
             self.image_info['perr_arcmin'] = self.action.args.perr.to(u.arcmin).value
+        if self.action.args.wcs is not None:
+            self.image_info['wcs'] = str(self.action.args.wcs.to_header()).strip()
         if self.action.args.jpegfile is not None:
             self.image_info['jpegs'] = [f"{self.action.args.jpegfile.name}"]
         for key in self.image_info.keys():
-            self.log.info(f'  {key}: {self.image_info[key]}')
+            self.log.debug(f'  {key}: {self.image_info[key]}')
 
         # Remove old entries for this image file
         deletion = self.action.args.images.delete_many( {'filename': self.action.args.kd.fitsfilename} )

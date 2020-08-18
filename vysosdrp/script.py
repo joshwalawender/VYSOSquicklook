@@ -98,31 +98,6 @@ def analyze_one():
         event = Event("next_file", args)
         queue.put(event)
 
-#     args = _parseArguments(sys.argv)
-#     framework = setup_framework(args)
-# 
-#     if args.input is not '':
-#         p = Path(args.input).expanduser()
-#         args.input = str(p)
-#         if p.exists() is False:
-#             framework.context.pipeline_logger.error(f'Could not find file: {args.input}')
-#         else:
-#             base_path = [x for x in p.parents][-3]
-#             if base_path == Path('/Users/vysosuser'):
-#                 pass
-#             elif base_path == Path('/Volumes/VYSOSData'):
-#                 framework.context.pipeline_logger.info(f'Setting file_type to *.fz')
-#                 framework.config['DEFAULT']['file_type'] = '*.fz'
-# 
-#             if p.is_file() is True:
-#                 framework.context.pipeline_logger.info(f'Found file: {args.input}')
-#             elif p.is_dir() is True:
-#                 framework.context.pipeline_logger.info(f'Found directory: {args.input}')
-# 
-#     framework.logger.info(f"Processing single file: {args.input}")
-#     framework.ingest_data(None, [args.input], False)
-#     framework.start(False, False, False, False)
-
 
 def watch_directory():
     args = _parseArguments(sys.argv)
@@ -146,8 +121,9 @@ def watch_directory():
             elif p.is_dir() is True:
                 framework.context.pipeline_logger.info(f'Found directory: {args.input}')
     else:
-        date_string = datetime.utcnow().strftime('%Y%m%dUT')
-        p = Path(f'~/V20Data/Images/{date_string}').expanduser()
+#         date_string = datetime.utcnow().strftime('%Y%m%dUT')
+#         p = Path(f'~/V20Data/Images/{date_string}').expanduser()
+        p = Path(f'~/V20Data/Images').expanduser()
         if p.exists() is False:
             p.mkdir(parents=True, exist_ok=True)
         args.input = str(p)

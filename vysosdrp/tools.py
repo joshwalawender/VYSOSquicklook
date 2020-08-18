@@ -1,9 +1,14 @@
+from pathlib import Path
+
 import numpy as np
 from astropy import units as u
 from astropy.time import Time
 from astropy.table import Table, Column
 import astropy.coordinates as c
 from astroquery.vizier import Vizier
+
+from matplotlib import pyplot as plt
+
 
 def get_catalog(pointing, radius, catalog='UCAC4', maglimit=None):
 
@@ -18,18 +23,22 @@ def get_catalog(pointing, radius, catalog='UCAC4', maglimit=None):
                   'Gaia': 'RA_ICRS'}
     dec_colname = {'UCAC4': '_DEJ2000',
                    'Gaia': 'DE_ICRS'}
+    mag_colname = {'UCAC4': 'rmag',
+                   'Gaia': 'RPmag'}
     filter_string = '>0' if maglimit is None else f"<{maglimit}"
-    column_filters = {'UCAC4': {"imag": filter_string},
-                      'Gaia': {"RPmag": filter_string} }
+    column_filter = {mag_colname[catalog]: filter_string}
+#     column_filters = {'UCAC4': {"imag": filter_string},
+#                       'Gaia': {"RPmag": filter_string} }
 
     v = Vizier(columns=columns[catalog],
-               column_filters=column_filters[catalog])
-    v.ROW_LIMIT = 1e4
+               column_filters=column_filter)
+    v.ROW_LIMIT = 2e4
 
     stars = Table(v.query_region(pointing, catalog=catalogs[catalog],
                                  radius=c.Angle(radius, "deg"))[0])
     stars.add_column( Column(data=stars[ra_colname[catalog]], name='RA') )
     stars.add_column( Column(data=stars[dec_colname[catalog]], name='DEC') )
+    stars.add_column( Column(data=stars[mag_colname[catalog]], name='mag') )
     return stars
 
 
@@ -53,3 +62,5 @@ def get_moon_info(lat=None, lon=None, height=None, temperature=None,
                  - np.cos(sun.dec.radian)*np.cos(moon.dec.radian)\
                  * np.cos(sun.ra.radian-moon.ra.radian))
     return moon_alt, moon_separation, moon_illum
+
+

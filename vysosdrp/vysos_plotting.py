@@ -8,9 +8,13 @@ plt.style.use('classic')
 import numpy as np
 from astropy import units as u
 from astropy.table import Table, Column
+from astropy.wcs.utils import proj_plane_pixel_scales
 import ephem
 
 
+##-----------------------------------------------------------------------------
+## get_sunrise_sunset
+##-----------------------------------------------------------------------------
 def get_sunrise_sunset(start):
     obs = ephem.Observer()
     obs.lon = "-155:34:33.9"
@@ -42,6 +46,9 @@ def get_sunrise_sunset(start):
     return result
 
 
+##-----------------------------------------------------------------------------
+## query_mongo
+##-----------------------------------------------------------------------------
 def query_mongo(db, collection, query):
     if collection == 'weather':
         names=('date', 'temp', 'clouds', 'wind', 'gust', 'rain', 'safe')
@@ -69,9 +76,122 @@ def query_mongo(db, collection, query):
     return result
 
 
-def make_nightly_plot(date_string=None, instrument='V20', pixel_scale=0.44,
-                      log=None):
+##-----------------------------------------------------------------------------
+## generate_report
+##-----------------------------------------------------------------------------
+def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
+                    objects=None, catalog=None, associated=None,
+                    header_pointing=None, wcs_pointing=None,
+                    ):
+    '''Generate an report on the image. Contains the image itself with overlays
+    and analysis plots.
+    '''
+    plt.rcParams.update({'font.size': 24})
+    binning = cfg['jpeg'].getint('binning', 1)
+    vmin = np.percentile(im, cfg['jpeg'].getfloat('vmin_percent', 0.5))
+    vmax = np.percentile(im, cfg['jpeg'].getfloat('vmax_percent', 99))
+    dpi = cfg['jpeg'].getint('dpi', 72)
+    nx, ny = im.shape
+    sx = nx/dpi/binning
+    sy = ny/dpi/binning
 
+    pixel_scale = np.mean(proj_plane_pixel_scales(wcs))*60*60
+
+    fig = plt.figure(figsize=(2*sx, 1*sy), dpi=dpi)
+#     ax = fig.gca()
+#     ax.set_xticks([])
+#     ax.set_yticks([])
+
+    plotpos = [ [ [0.010, 0.010, 0.580, 0.965], [0.600, 0.525, 0.375, 0.450] ],
+                [ None                        , [0.600, 0.050, 0.375, 0.425] ],
+              ]
+
+
+    ##-------------------------------------------------------------------------
+    # Show JPEG of Image
+    jpeg_axes = plt.axes(plotpos[0][0])
+    jpeg_axes.imshow(im, cmap=plt.cm.gray, vmin=vmin, vmax=vmax)
+    jpeg_axes.set_xticks([])
+    jpeg_axes.set_yticks([])
+    jpeg_axes.set_title(f'{fitsfile}')
+
+    if cfg['jpeg'].getboolean('overplot_extracted', False) is True and objects is not None:
+        radius = cfg['jpeg'].getfloat('extracted_radius', 6)
+        for star in objects:
+            if star['x'] > 0 and star['x'] < nx and star['y'] > 0 and star['y'] < ny:
+                c = plt.Circle((star['x'], star['y']), radius=radius,
+                               edgecolor='r', facecolor='none')
+                jpeg_axes.add_artist(c)
+
+    if cfg['jpeg'].getboolean('overplot_catalog', False) is True and catalog is not None:
+        radius = cfg['jpeg'].getfloat('catalog_radius', 6)
+        x, y = wcs.all_world2pix(catalog['RA'], catalog['DEC'], 1)
+        for xy in zip(x, y):
+            if xy[0] > 0 and xy[0] < nx and xy[1] > 0 and xy[1] < ny:
+                c = plt.Circle(xy, radius=radius, edgecolor='b', facecolor='none')
+                jpeg_axes.add_artist(c)
+
+    if cfg['jpeg'].getboolean('overplot_associated', False) is True and associated is not None:
+        radius = cfg['jpeg'].getfloat('associated_radius', 6)
+        for entry in associated:
+            xy = (entry['x'], entry['y'])
+            c = plt.Circle(xy, radius=radius, edgecolor='g', facecolor='none')
+            jpeg_axes.add_artist(c)
+
+    if cfg['jpeg'].getboolean('overplot_pointing', False) is True\
+        and header_pointing is not None\
+        and wcs_pointing is not None:
+        radius = cfg['jpeg'].getfloat('pointing_radius', 6)
+        x, y = wcs.all_world2pix(header_pointing.ra.degree,
+                                 header_pointing.dec.degree, 1)
+        jpeg_axes.plot([nx/2-radius,nx/2+radius], [ny/2,ny/2], 'y-', alpha=0.7)
+        jpeg_axes.plot([nx/2, nx/2], [ny/2-radius,ny/2+radius], 'y-', alpha=0.7)
+        # Draw crosshair on target
+        c = plt.Circle((x, y), radius=radius, edgecolor='g', alpha=0.7,
+                       facecolor='none')
+        jpeg_axes.add_artist(c)
+        jpeg_axes.plot([x, x], [y+0.6*radius, y+1.4*radius], 'g', alpha=0.7)
+        jpeg_axes.plot([x, x], [y-0.6*radius, y-1.4*radius], 'g', alpha=0.7)
+        jpeg_axes.plot([x-0.6*radius, x-1.4*radius], [y, y], 'g', alpha=0.7)
+        jpeg_axes.plot([x+0.6*radius, x+1.4*radius], [y, y], 'g', alpha=0.7)
+
+    jpeg_axes.set_xlim(0,nx)
+    jpeg_axes.set_ylim(0,ny)
+
+    ##-------------------------------------------------------------------------
+    # Plot histogram of FWHM
+    if objects is not None:
+        fwhm_axes = plt.axes(plotpos[0][1])
+        avg_fwhm = np.median(objects['FWHM'])*pixel_scale
+        fwhm_axes.set_title(f"FWHM = {avg_fwhm:.1f} arcsec")
+        nstars, bins, p = fwhm_axes.hist(objects['FWHM']*pixel_scale,
+                                         bins=np.arange(1,7,0.25))
+        fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.7)
+        fwhm_axes.set_xlabel('FWHM (arcsec)')
+        fwhm_axes.set_ylabel('N stars')
+        fwhm_axes.set_ylim(0,max(nstars)*1.2)
+
+    ##-------------------------------------------------------------------------
+    # Plot instrumental mags
+    if associated is not None:
+        mag_axes = plt.axes(plotpos[1][1])
+        mag_axes.set_title(f"")
+        mag_axes.plot(associated['mag'], associated['instmag'], 'ko')
+        mag_axes.set_xlabel('Catalog Mag')
+        mag_axes.set_ylabel('Instrumental Mag')
+        plt.grid()
+
+    reportfilename = f'{fitsfile.split(".")[0]}.jpg'
+    reportfile = Path('/var/www/plots/V20/') / reportfilename
+    plt.savefig(reportfile, dpi=dpi)
+    return reportfile
+
+
+##-----------------------------------------------------------------------------
+## make_nightly_plot
+##-----------------------------------------------------------------------------
+def make_nightly_plot(date_string=None, log=None, instrument='V20',
+                      pixel_scale=0.44):
         if date_string is None:
             date_string = datetime.utcnow().strftime('%Y%m%dUT')
 
@@ -113,17 +233,17 @@ def make_nightly_plot(date_string=None, instrument='V20', pixel_scale=0.44,
         plot_end = twilights['sunrise'] + timedelta(0, 1800)
 
         time_ticks_values = np.arange(twilights['sunset'].hour,twilights['sunrise'].hour+1)
-        plot_positions = [ ( [0.000, 0.755, 0.465, 0.245], [0.535, 0.760, 0.465, 0.240] ),
-                           ( [0.000, 0.550, 0.465, 0.180], [0.535, 0.495, 0.465, 0.240] ),
-                           ( [0.000, 0.490, 0.465, 0.050], [0.535, 0.245, 0.465, 0.240] ),
-                           ( [0.000, 0.210, 0.465, 0.250], [0.535, 0.000, 0.465, 0.235] ),
-                           ( [0.000, 0.000, 0.465, 0.200], None                         ) ]
+        plotpos = [ ( [0.000, 0.755, 0.465, 0.245], [0.535, 0.760, 0.465, 0.240] ),
+                    ( [0.000, 0.550, 0.465, 0.180], [0.535, 0.495, 0.465, 0.240] ),
+                    ( [0.000, 0.490, 0.465, 0.050], [0.535, 0.245, 0.465, 0.240] ),
+                    ( [0.000, 0.210, 0.465, 0.250], [0.535, 0.000, 0.465, 0.235] ),
+                    ( [0.000, 0.000, 0.465, 0.200], None                         ) ]
         Figure = plt.figure(figsize=(13,9.5), dpi=100)
 
         ##------------------------------------------------------------------------
         ## Temperatures
         if log: log.info('Adding temperature plot')
-        t = plt.axes(plot_positions[0][0])
+        t = plt.axes(plotpos[0][0])
         plt.title(f"Temperatures for V20 on the Night of {date_string}")
         t.plot_date(weather['date'], weather['temp']*9/5+32, 'k-',
                          markersize=2, markeredgewidth=0, drawstyle="default",
@@ -170,7 +290,7 @@ def make_nightly_plot(date_string=None, instrument='V20', pixel_scale=0.44,
         ##------------------------------------------------------------------------
         ## Temperature Differences (V20 Only)
         if log: log.info('Adding temperature difference plot')
-        d = plt.axes(plot_positions[1][0])
+        d = plt.axes(plotpos[1][0])
 
         from scipy import interpolate
         xw = [(x-weather['date'][0]).total_seconds() for x in weather['date']]
@@ -206,7 +326,7 @@ def make_nightly_plot(date_string=None, instrument='V20', pixel_scale=0.44,
         ##------------------------------------------------------------------------
         ## Fan State/Power (V20 Only)
         if log: log.info('Adding fan state/power plot')
-        f = plt.axes(plot_positions[2][0])
+        f = plt.axes(plotpos[2][0])
         f.plot_date(status['date'], status['fan_speed'], 'b-', \
                              label="Mirror Fans")
         plt.xlim(plot_start, plot_end)
@@ -221,7 +341,7 @@ def make_nightly_plot(date_string=None, instrument='V20', pixel_scale=0.44,
         ##------------------------------------------------------------------------
         ## FWHM
         if log: log.info('Adding FWHM plot')
-        f = plt.axes(plot_positions[3][0])
+        f = plt.axes(plotpos[3][0])
         plt.title(f"Image Quality for V20 on the Night of {date_string}")
 
         fwhm = images['FWHM_pix']*u.pix * pixel_scale
@@ -240,7 +360,7 @@ def make_nightly_plot(date_string=None, instrument='V20', pixel_scale=0.44,
         ## ellipticity
         ##------------------------------------------------------------------------
         if log: log.info('Adding ellipticity plot')
-        e = plt.axes(plot_positions[4][0])
+        e = plt.axes(plotpos[4][0])
         e.plot_date(images['date'], images['ellipticity'], 'ko',
                          markersize=3, markeredgewidth=0,
                          label="ellipticity")
@@ -255,7 +375,7 @@ def make_nightly_plot(date_string=None, instrument='V20', pixel_scale=0.44,
         ## Cloudiness
         ##------------------------------------------------------------------------
         if log: log.info('Adding cloudiness plot')
-        c = plt.axes(plot_positions[0][1])
+        c = plt.axes(plotpos[0][1])
         plt.title(f"Cloudiness")
         wsafe = np.where(weather['clouds'] < weather_limits['Cloudiness (C)'][0])[0]
         wwarn = np.where(np.array(weather['clouds'] >= weather_limits['Cloudiness (C)'][0])\
@@ -336,7 +456,7 @@ def make_nightly_plot(date_string=None, instrument='V20', pixel_scale=0.44,
         ##------------------------------------------------------------------------
         ## Humidity, Wetness, Rain
         if log: log.info('Adding rain plot')
-        r = plt.axes(plot_positions[1][1])
+        r = plt.axes(plotpos[1][1])
 
         wsafe = np.where(weather['rain'] > weather_limits['Rain'][0])[0]
         wwarn = np.where(np.array(weather['rain'] <= weather_limits['Rain'][0])\
@@ -366,7 +486,7 @@ def make_nightly_plot(date_string=None, instrument='V20', pixel_scale=0.44,
         ##------------------------------------------------------------------------
         ## Wind Speed
         if log: log.info('Adding wind speed plot')
-        w = plt.axes(plot_positions[2][1])
+        w = plt.axes(plotpos[2][1])
 
         wsafe = np.where(weather['wind'] < weather_limits['Wind (kph)'][0])[0]
         wwarn = np.where(np.array(weather['wind'] >= weather_limits['Wind (kph)'][0])\
