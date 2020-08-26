@@ -63,6 +63,7 @@ class ReadFITS(BasePrimitive):
         self.action.args.ellipticity = np.nan
         self.action.args.zero_point = np.nan
         self.action.args.fitsfilepath = Path(self.action.args.name).expanduser().absolute()
+        self.action.args.associated = None
 
         # If we are reading a compressed file, use the uncompressed version of
         # the name for the database
@@ -97,8 +98,7 @@ class ReadFITS(BasePrimitive):
         if self.action.args.images is not None:
             already_processed = [d for d in self.action.args.images.find( {'filename': self.action.args.fitsfile} )]
             if len(already_processed) != 0\
-               and self.cfg['VYSOS20'].getboolean('overwrite', False) is False\
-               and self.action.args.overwrite is False:
+               and self.cfg['VYSOS20'].getboolean('overwrite', False) is False:
                 self.log.info('  File is already in the database, skipping further processing')
                 self.action.args.skip = True
             if len(already_processed) != 0:

@@ -95,7 +95,10 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
     sx = nx/dpi/binning
     sy = ny/dpi/binning
 
-    pixel_scale = np.mean(proj_plane_pixel_scales(wcs))*60*60
+    if wcs is not None:
+        pixel_scale = np.mean(proj_plane_pixel_scales(wcs))*60*60
+    else:
+        pixel_scale = cfg['VYSOS20'].getfloat('pixel_scale', 1)
 
     fig = plt.figure(figsize=(2*sx, 1*sy), dpi=dpi)
 #     ax = fig.gca()
