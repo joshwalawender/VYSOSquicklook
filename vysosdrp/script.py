@@ -15,7 +15,7 @@ from pathlib import Path
 from datetime import datetime
 from glob import glob
 
-from vysosdrp.pipelines import QuickLookPipeline
+from vysosdrp.pipelines import QuickLookPipeline, CalsPipeline
 
 
 def _parseArguments(in_args):
@@ -23,9 +23,12 @@ def _parseArguments(in_args):
                       description='')
     parser.add_argument('-c', dest="config_file", type=str,
            help="Configuration file")
+    parser.add_argument("--cals", dest="cals",
+           default=False, action="store_true",
+           help="Run the cals pipeline?")
     parser.add_argument("-O", "--overwrite", dest="overwrite",
            default=False, action="store_true",
-           help="Reprocess files if they already exist in database?")
+           help="Reprocess files if they already exist in database?  Only works for analyzeone.")
     parser.add_argument("--norecord", dest="norecord",
            default=False, action="store_true",
            help="Skip recording results to mongo DB?")
@@ -107,7 +110,7 @@ def analyze_one():
 
 def watch_directory():
     args = _parseArguments(sys.argv)
-    framework = setup_framework(args)
+    framework = setup_framework(args, pipeline=QuickLookPipeline)
 
     if args.input is not '':
         p = Path(args.input).expanduser()
@@ -163,6 +166,40 @@ def change_directory():
         event = Event("update_directory", args)
         queue.put(event)
 
+
+def watch_for_cals():
+    args = _parseArguments(sys.argv)
+    framework = setup_framework(args, pipeline=CalsPipeline)
+
+    if args.input is not '':
+        p = Path(args.input).expanduser()
+        args.input = str(p)
+        if p.exists() is False:
+            framework.context.pipeline_logger.error(f'Could not find: {args.input}')
+        else:
+            base_path = [x for x in p.parents][-3]
+            if base_path == Path('/Users/vysosuser'):
+                pass
+            elif base_path == Path('/Volumes/VYSOSData'):
+                framework.context.pipeline_logger.info(f'Setting file_type to *.fz')
+                framework.config['DEFAULT']['file_type'] = '*.fz'
+
+            if p.is_file() is True:
+                framework.context.pipeline_logger.info(f'Found file: {args.input}')
+            elif p.is_dir() is True:
+                framework.context.pipeline_logger.info(f'Found directory: {args.input}')
+    else:
+#         date_string = datetime.utcnow().strftime('%Y%m%dUT')
+#         p = Path(f'~/V20Data/Images/{date_string}').expanduser()
+        p = Path(f'~/V20Data/Images').expanduser()
+        if p.exists() is False:
+            p.mkdir(parents=True, exist_ok=True)
+        args.input = str(p)
+
+    framework.logger.info(f'Ingesting files from {args.input}')
+    infiles = glob(f"{args.input}/{framework.config['DEFAULT']['file_type']}")
+    framework.ingest_data(args.input, infiles, True)
+    framework.start(False, False, False, True)
 
 if __name__ == "__main__":
     analyze_one()

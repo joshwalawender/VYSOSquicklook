@@ -1,19 +1,35 @@
 from pathlib import Path
 from datetime import datetime, timedelta
-import pymongo
-import matplotlib.pyplot as plt
+import sys
+import re
+import subprocess
+from matplotlib import pyplot as plt
 from matplotlib.dates import HourLocator, MinuteLocator, DateFormatter
 plt.style.use('classic')
+import pymongo
 
 import numpy as np
+from astropy.io import fits
 from astropy import units as u
+from astropy import stats
+from astropy.time import Time
+import astropy.coordinates as c
+from astropy.wcs import WCS
 from astropy.table import Table, Column
 from astropy.wcs.utils import proj_plane_pixel_scales
 import ephem
+import ccdproc
+import photutils
+import sep
+
+from keckdata import fits_reader, VYSOS20
+
+from keckdrpframework.primitives.base_primitive import BasePrimitive
+from keckdrpframework.models.arguments import Arguments
 
 
 ##-----------------------------------------------------------------------------
-## get_sunrise_sunset
+## Function: get_sunrise_sunset
 ##-----------------------------------------------------------------------------
 def get_sunrise_sunset(start):
     obs = ephem.Observer()
@@ -47,7 +63,7 @@ def get_sunrise_sunset(start):
 
 
 ##-----------------------------------------------------------------------------
-## query_mongo
+## Function: query_mongo
 ##-----------------------------------------------------------------------------
 def query_mongo(db, collection, query):
     if collection == 'weather':
@@ -77,7 +93,7 @@ def query_mongo(db, collection, query):
 
 
 ##-----------------------------------------------------------------------------
-## generate_report
+## Function: generate_report
 ##-----------------------------------------------------------------------------
 def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
                     objects=None, catalog=None, associated=None,
@@ -590,4 +606,527 @@ def make_nightly_plot(date_string=None, log=None, instrument='V20',
         plt.savefig(night_plot_file, dpi=100, bbox_inches='tight', pad_inches=0.10)
         if log: log.info('Done.')
 
+
+
+
+
+
+
+##-----------------------------------------------------------------------------
+## Primitive: CopyDataLocally
+##-----------------------------------------------------------------------------
+class CopyDataLocally(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        """
+        Constructor
+        """
+        BasePrimitive.__init__(self, action, context)
+        # to use the pipeline logger instead of the framework logger, use this:
+        self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        some_pre_condition = not self.action.args.skip
+
+        if self.action.args.fitsfilepath.parts[:5] != ['/', 'Users', 'vysosuser', 'V20Data', 'Images']:
+            some_pre_condition = False
+
+        if not re.match('\d{8}UT', self.action.args.fitsfilepath.parts[-2]):
+            some_pre_condition = False
+
+        # Check if a destination is set in the config file
+        if self.cfg['Telescope'].get('copy_local', None) is None:
+            some_pre_condition = False
+
+        if some_pre_condition is True:
+            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
+        else:
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        some_post_condition = True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
+        else:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+
+        # Try to determine date string from path to file
+        fitsfile = self.action.args.fitsfilepath
+        date_string = fitsfile.parts[-2]
+
+        # Look for log file
+        logfile = fitsfile.parent.parent.parent / 'Logs' / fitsfile.parts[-2] / f"{fitsfile.stem}.log"
+
+        destinations = self.cfg['Telescope'].get('copy_local', None).split(',')
+        success = [False] * len(destinations)
+        for destination in destinations:
+            destination = Path(destination).expanduser()
+            self.log.debug(f'  Destination: {destination}')
+            image_destination = destination.joinpath('Images', '2020', date_string, fitsfile.name)
+            if image_destination.parent.exists() is False:
+                image_destination.parent.mkdir(parents=True)
+            image_destination_fz = destination.joinpath('Images', '2020', date_string, f'{fitsfile.name}.fz')
+            self.log.debug(f'  Image Destination: {image_destination}')
+            log_destination = destination.joinpath('Logs', '2020', date_string)
+            if log_destination.parent.exists() is False:
+                log_destination.parent.mkdir(parents=True)
+            self.log.debug(f'  Log Destination: {log_destination}')
+
+            if image_destination.exists() == False and image_destination_fz.exists() == False:
+                self.log.info(f'Writing fits file to {image_destination}')
+                with fits.open(fitsfile, checksum=True) as hdul:
+                    hdul[0].add_checksum()
+                    hdul.writeto(image_destination, checksum=True)
+            if image_destination.exists() == True and image_destination_fz.exists() == False:
+                self.log.info(f'Compressing fits file at {image_destination}')
+                subprocess.call(['fpack', image_destination])
+
+        return self.action.args
+
+
+##-----------------------------------------------------------------------------
+## Primitive: MoonInfo
+##-----------------------------------------------------------------------------
+class MoonInfo(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        """
+        Constructor
+        """
+        BasePrimitive.__init__(self, action, context)
+        # to use the pipeline logger instead of the framework logger, use this:
+        self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        some_pre_condition = not self.action.args.skip
+
+        if some_pre_condition is True:
+            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
+        else:
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        some_post_condition = True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
+        else:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+
+        lat=c.Latitude(self.action.args.kd.get('SITELAT'), unit=u.degree)
+        lon=c.Longitude(self.action.args.kd.get('SITELONG'), unit=u.degree)
+        height=float(self.action.args.kd.get('ALT-OBS')) * u.meter
+        loc = c.EarthLocation(lon, lat, height)
+        temperature=float(self.action.args.kd.get('AMBTEMP'))*u.Celsius
+        pressure=self.cfg['Telescope'].getfloat('pressure', 700)*u.mbar
+        altazframe = c.AltAz(location=loc, obstime=self.action.args.obstime,
+                             temperature=temperature,
+                             pressure=pressure)
+        moon = c.get_moon(Time(time), location=loc)
+        sun = c.get_sun(Time(time))
+
+        moon_alt = ((moon.transform_to(altazframe).alt).to(u.degree)).value
+        moon_separation = (moon.separation(self.action.args.header_pointing).to(u.degree)).value\
+                    if self.action.args.header_pointing is not None else None
+
+        # Moon illumination formula from Meeus, “Astronomical 
+        # Algorithms". Formulae 46.1 and 46.2 in the 1991 edition, 
+        # using the approximation cos(psi) \approx -cos(i). Error 
+        # should be no more than 0.0014 (p. 316). 
+        moon_illum = 50*(1 - np.sin(sun.dec.radian)*np.sin(moon.dec.radian)\
+                     - np.cos(sun.dec.radian)*np.cos(moon.dec.radian)\
+                     * np.cos(sun.ra.radian-moon.ra.radian))
+
+        self.action.args.moon_alt = moon_alt
+        self.action.args.moon_separation = moon_separation
+        self.action.args.moon_illum = moon_illum
+
+        return self.action.args
+
+
+##-----------------------------------------------------------------------------
+## Primitive: RenderJPEG
+##-----------------------------------------------------------------------------
+class RenderJPEG(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        """
+        Constructor
+        """
+        BasePrimitive.__init__(self, action, context)
+        # to use the pipeline logger instead of the framework logger, use this:
+        self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        some_pre_condition = not self.action.args.skip
+        if some_pre_condition is True:
+            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
+        else:
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        some_post_condition = True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
+        else:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+
+        self.action.args.jpegfile = generate_report(
+                              self.action.args.kd.pixeldata[0].data,
+                              self.action.args.wcs,
+                              fitsfile=self.action.args.fitsfile,
+                              cfg=self.cfg,
+                              objects=self.action.args.objects,
+                              catalog=self.action.args.catalog,
+                              associated=self.action.args.associated,
+                              header_pointing=self.action.args.header_pointing,
+                              wcs_pointing=self.action.args.wcs_pointing,
+                              zero_point_fit=self.action.args.zero_point_fit,
+                              f0=self.action.args.f0,
+                              )
+
+        return self.action.args
+
+
+##-----------------------------------------------------------------------------
+## Primitive: Record
+##-----------------------------------------------------------------------------
+class Record(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        """
+        Constructor
+        """
+        BasePrimitive.__init__(self, action, context)
+        # to use the pipeline logger instead of the framework logger, use this:
+        self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        some_pre_condition = (not self.action.args.skip)\
+                         and (not self.cfg['Telescope'].getboolean('norecord', False))\
+                         and (self.action.args.images is not None)
+
+        if some_pre_condition is True:
+            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
+        else:
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
+            self.log.info('Done')
+            print()
+        return some_pre_condition
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        some_post_condition = True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
+        else:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        self.log.info('Done')
+        print()
+
+        return some_post_condition
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+
+        # Comple image info to store
+        self.image_info = {
+            'filename': self.action.args.fitsfile,
+            'telescope': self.action.args.kd.instrument,
+            'compressed': Path(self.action.args.kd.fitsfilename).suffix == '.fz',
+            'target name': self.action.args.kd.get('OBJECT'),
+            'exptime': float(self.action.args.kd.get('EXPTIME')),
+            'date': datetime.strptime(self.action.args.kd.get('DATE-OBS'), '%Y-%m-%dT%H:%M:%S'),
+            'filter': self.action.args.kd.get('FILTER'),
+            'az': float(self.action.args.kd.get('AZIMUTH')),
+            'alt': float(self.action.args.kd.get('ALTITUDE')),
+            'airmass': float(self.action.args.kd.get('AIRMASS')),
+            'header_RA': self.action.args.header_pointing.ra.deg,
+            'header_DEC': self.action.args.header_pointing.dec.deg,
+            'moon_alt': self.action.args.moon_alt,
+            'moon_separation': self.action.args.moon_separation,
+            'moon_illumination': self.action.args.moon_illum,
+            'FWHM_pix': self.action.args.fwhm,
+            'ellipticity': self.action.args.ellipticity,
+            'n_stars': self.action.args.n_objects,
+            'analyzed': True,
+            'SIDREversion': 'n/a',
+            }
+        if self.action.args.zero_point_fit is not None:
+            self.image_info['zero point'] = self.action.args.zero_point_fit.slope.value
+        if self.action.args.sky_background is not None:
+            self.image_info['sky background'] = self.action.args.sky_background
+        if self.action.args.perr is not None and not np.isnan(self.action.args.perr):
+            self.image_info['perr_arcmin'] = self.action.args.perr.to(u.arcmin).value
+        if self.action.args.wcs is not None:
+            self.image_info['wcs'] = str(self.action.args.wcs.to_header()).strip()
+        if self.action.args.jpegfile is not None:
+            self.image_info['jpegs'] = [f"{self.action.args.jpegfile.name}"]
+        for key in self.image_info.keys():
+            self.log.debug(f'  {key}: {self.image_info[key]}')
+
+        # Remove old entries for this image file
+        deletion = self.action.args.images.delete_many( {'filename': self.action.args.kd.fitsfilename} )
+        self.log.debug(f'  Deleted {deletion.deleted_count} previous entries for {self.action.args.kd.fitsfilename}')
+
+        # Save new entry for this image file
+        self.log.debug('Adding image info to mongo database')
+        ## Save document
+        try:
+            inserted_id = self.action.args.images.insert_one(self.image_info).inserted_id
+            self.log.debug(f"  Inserted document id: {inserted_id}")
+        except:
+            e = sys.exc_info()[0]
+            self.log.error('Failed to add new document')
+            self.log.error(e)
+        self.action.args.mongoclient.close()
+
+        return self.action.args
+
+
+##-----------------------------------------------------------------------------
+## Primitive: UpdateDirectory
+##-----------------------------------------------------------------------------
+class UpdateDirectory(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        """
+        Constructor
+        """
+        BasePrimitive.__init__(self, action, context)
+        # to use the pipeline logger instead of the framework logger, use this:
+        self.log = context.pipeline_logger
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        some_pre_condition = True
+        if some_pre_condition is True:
+            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
+        else:
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        some_post_condition = True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
+        else:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+
+        newdir = Path(self.action.args.input).expanduser()
+        if newdir.exists() is False:
+            self.log.info(f"  Creating directory {newdir}")
+            newdir.mkdir(parents=True)
+        self.log.info(f"  Updating directory to {newdir}")
+
+        self.context.data_set.remove_all()
+        self.context.data_set.change_directory(f"{newdir}")
+
+        files = [f.name for f in newdir.glob('*.fts')]
+        self.log.info(f"  Ingesting {len(files)} files")
+        self.log.debug(files)
+        for file in files:
+            self.log.debug(f"  Appending {file}")
+            self.context.data_set.append_item(file)
+
+        self.context.data_set.start_monitor()
+
+        return self.action.args
+
+
+##-----------------------------------------------------------------------------
+## Primitive: SetOverwrite
+##-----------------------------------------------------------------------------
+class SetOverwrite(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        """
+        Constructor
+        """
+        BasePrimitive.__init__(self, action, context)
+        # to use the pipeline logger instead of the framework logger, use this:
+        self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        some_pre_condition = True
+        if some_pre_condition is True:
+            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
+        else:
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        some_post_condition = True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
+        else:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+        self.log.info(f"  Setting overwrite to True")
+        self.cfg.set('Telescope', 'overwrite', value='True')
+
+        return self.action.args
+
+
+
+# class Template(BasePrimitive):
+#     """
+#     This is a template for primitives, which is usually an action.
+# 
+#     The methods in the base class can be overloaded:
+#     - _pre_condition
+#     - _post_condition
+#     - _perform
+#     - apply
+#     - __call__
+#     """
+# 
+#     def __init__(self, action, context):
+#         """
+#         Constructor
+#         """
+#         BasePrimitive.__init__(self, action, context)
+#         # to use the pipeline logger instead of the framework logger, use this:
+#         self.log = context.pipeline_logger
+#         self.cfg = self.context.config.instrument
+# 
+#     def _pre_condition(self):
+#         """Check for conditions necessary to run this process"""
+#         some_pre_condition = not self.action.args.skip
+#         if some_pre_condition is True:
+#             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
+#         else:
+#             self.log.warning(f"Precondition for {self.__class__.__name__} failed")
+#         return some_pre_condition
+# 
+#     def _post_condition(self):
+#         """Check for conditions necessary to verify that the process run correctly"""
+#         some_post_condition = True
+#         if some_post_condition is True:
+#             self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
+#         else:
+#             self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+#         return some_post_condition
+# 
+#     def _perform(self):
+#         """
+#         Returns an Argument() with the parameters that depends on this operation.
+#         """
+#         self.log.info(f"Running {self.__class__.__name__} action")
+# 
+#         return self.action.args
 
