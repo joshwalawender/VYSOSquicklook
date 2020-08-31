@@ -694,8 +694,6 @@ class ExtractStars(BasePrimitive):
         final_sum = phot_table['aperture_sum_0'] - bkg_sum
         phot_table['flux2'] = final_sum
         self.action.args.objects.add_column(phot_table['flux2'])
-#         for i,entry in enumerate(phot_table):
-#             self.log.info(self.action.args.objects[i]['flux'] / phot_table[i]['aperture_sum'])\
 
         return self.action.args
 
@@ -954,7 +952,7 @@ class AssociateCatalogStars(BasePrimitive):
 
         exptime = float(self.action.args.kd.get('EXPTIME'))
 
-        assoc_threshold = self.cfg['Extract'].getfloat('accoc_radius', 1)*u.arcsec
+        assoc_radius = self.cfg['Extract'].getfloat('accoc_radius', 1)*u.arcsec
         associated = Table(names=('RA', 'DEC', 'x', 'y', 'assoc_distance', 'mag', 'catflux', 'flux', 'flux2', 'instmag', 'FWHM'),
                            dtype=('f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8') )
 
@@ -973,7 +971,7 @@ class AssociateCatalogStars(BasePrimitive):
             ra_deg, dec_deg = self.action.args.wcs.all_pix2world(detected['x'], detected['y'], 1)
             detected_coord = c.SkyCoord(ra_deg, dec_deg, frame='fk5', unit=(u.deg, u.deg))
             idx, d2d, d3d = detected_coord.match_to_catalog_sky(catalog_coords)
-            if d2d[0].to(u.arcsec) < assoc_threshold.to(u.arcsec):
+            if d2d[0].to(u.arcsec) < assoc_radius.to(u.arcsec):
                 associated.add_row( {'RA': self.action.args.catalog[idx]['RA'],
                                      'DEC': self.action.args.catalog[idx]['DEC'],
                                      'x': detected['x'],

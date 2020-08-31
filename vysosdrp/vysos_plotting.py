@@ -218,9 +218,6 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
         mag_axes.set_xlabel('Estimated Catalog Flux (photons/s)')
         mag_axes.set_ylabel('Measured Flux (electrons/s)')
         plt.grid()
-#         nclip = int(0.05*len(associated['catflux']))
-#         plt.xlim(0,sorted(associated['catflux'])[-nclip])
-#         plt.ylim(0,sorted(associated['flux'])[-nclip])
         if zero_point_fit is not None:
             label = f'throughput={zero_point_fit.slope.value:.3g} e-/photon'
             mag_axes.plot(associated['catflux'],
