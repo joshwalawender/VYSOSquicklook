@@ -1005,7 +1005,7 @@ class AssociateCatalogStars(BasePrimitive):
 #         line_init.intercept.fixed = True
 #         fitted_line = fit(line_init, associated['catflux'], associated['flux2'])
 
-        self.log.info(f"  Slope (ADU/photon) = {fitted_line.slope.value:.3g}")
+        self.log.info(f"  Slope (e-/photon) = {fitted_line.slope.value:.3g}")
         self.action.args.zero_point_fit = fitted_line
 
         return self.action.args
