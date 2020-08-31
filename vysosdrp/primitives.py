@@ -99,8 +99,8 @@ class ReadFITS(BasePrimitive):
         if self.action.args.images is not None:
             already_processed = [d for d in self.action.args.images.find( {'filename': self.action.args.fitsfile} )]
             if len(already_processed) != 0\
-               and self.cfg['VYSOS20'].getboolean('overwrite', False) is False:
-                self.log.info(f"overwrite is {self.cfg['VYSOS20'].getboolean('overwrite')}")
+               and self.cfg['Telescope'].getboolean('overwrite', False) is False:
+                self.log.info(f"overwrite is {self.cfg['Telescope'].getboolean('overwrite')}")
                 self.log.info('  File is already in the database, skipping further processing')
                 self.action.args.skip = True
             if len(already_processed) != 0:
@@ -180,7 +180,7 @@ class CopyDataLocally(BasePrimitive):
             some_pre_condition = False
 
         # Check if a destination is set in the config file
-        if self.cfg['VYSOS20'].get('copy_local', None) is None:
+        if self.cfg['Telescope'].get('copy_local', None) is None:
             some_pre_condition = False
 
         if some_pre_condition is True:
@@ -211,7 +211,7 @@ class CopyDataLocally(BasePrimitive):
         # Look for log file
         logfile = fitsfile.parent.parent.parent / 'Logs' / fitsfile.parts[-2] / f"{fitsfile.stem}.log"
 
-        destinations = self.cfg['VYSOS20'].get('copy_local', None).split(',')
+        destinations = self.cfg['Telescope'].get('copy_local', None).split(',')
         success = [False] * len(destinations)
         for destination in destinations:
             destination = Path(destination).expanduser()
@@ -292,7 +292,7 @@ class MoonInfo(BasePrimitive):
                   lon=c.Longitude(self.action.args.kd.get('SITELONG'), unit=u.degree),
                   height=float(self.action.args.kd.get('ALT-OBS')) * u.meter,
                   temperature=float(self.action.args.kd.get('AMBTEMP'))*u.Celsius,
-                  pressure=self.cfg['VYSOS20'].getfloat('pressure', 700)*u.mbar,
+                  pressure=self.cfg['Telescope'].getfloat('pressure', 700)*u.mbar,
                   time=self.action.args.obstime,
                   pointing=self.action.args.header_pointing)
         self.action.args.moon_alt = alt
@@ -354,7 +354,7 @@ class GainCorrect(BasePrimitive):
         gain = self.action.args.kd.get('GAIN', None)
         if gain is not None: self.log.debug(f'Got gain from header: {gain}')
         if gain is None:
-            gain = self.cfg['VYSOS20'].getfloat('gain', None)
+            gain = self.cfg['Telescope'].getfloat('gain', None)
             self.log.debug(f'Got gain from config: {gain}')
             self.action.args.kd.headers.append(fits.Header( {'GAIN': gain} ))
 
@@ -422,7 +422,7 @@ class CreateDeviation(BasePrimitive):
         if rn is not None: self.log.debug(f'Got read noise from header: {rn}')
 
         if rn is None:
-            rn = self.cfg['VYSOS20'].getfloat('RN', None)
+            rn = self.cfg['Telescope'].getfloat('RN', None)
             self.log.debug(f'Got read noise from config: {rn}')
             self.action.args.kd.headers.append(fits.Header( {'READNOISE': rn} ))
 
@@ -607,7 +607,7 @@ class ExtractStars(BasePrimitive):
         # Photutils StarFinder
 #         extract_fwhm = self.cfg['Extract'].getfloat('extract_fwhm', 5)
 #         thresh = self.cfg['Extract'].getint('extract_threshold', 9)
-#         pixel_scale = self.cfg['VYSOS20'].getfloat('pixel_scale', 1)
+#         pixel_scale = self.cfg['Telescope'].getfloat('pixel_scale', 1)
 #         pd = self.action.args.kd.pixeldata[0]
 #         mean, median, std = stats.sigma_clipped_stats(pd.data, sigma=3.0)
 #         # daofind = photutils.DAOStarFinder(fwhm=extract_fwhm, threshold=thresh*std)  
@@ -633,7 +633,7 @@ class ExtractStars(BasePrimitive):
 #             self.action.args.ellipticity = np.nan
 
         # Source Extractor
-        pixel_scale = self.cfg['VYSOS20'].getfloat('pixel_scale', 1)
+        pixel_scale = self.cfg['Telescope'].getfloat('pixel_scale', 1)
         thresh = self.cfg['Extract'].getint('extract_threshold', 9)
         minarea = self.cfg['Extract'].getint('extract_minarea', 7)
         mina = self.cfg['Extract'].getfloat('fwhm_mina', 1)
@@ -681,9 +681,11 @@ class ExtractStars(BasePrimitive):
 
         ## Do second photometry measurement
         positions = [(det['x'], det['y']) for det in self.action.args.objects]
-        star_apertures = photutils.CircularAperture(positions, int(FWHM_pix))
+        ap_radius = int(2.0*FWHM_pix)
+        star_apertures = photutils.CircularAperture(positions, ap_radius)
         sky_apertures = photutils.CircularAnnulus(positions,
-                                                  r_in=int(FWHM_pix)+1, r_out=int(FWHM_pix)+3)
+                                                  r_in=ap_radius+2,
+                                                  r_out=ap_radius+6)
         phot_table = photutils.aperture_photometry(
                                self.action.args.kd.pixeldata[0],
                                [star_apertures, sky_apertures])
@@ -726,7 +728,7 @@ class SolveAstrometry(BasePrimitive):
         """Check for conditions necessary to run this process"""
         some_pre_condition = not self.action.args.skip
 
-        if (self.action.args.wcs is not None) and (self.cfg['VYSOS20'].getboolean('force_solve', False) is False):
+        if (self.action.args.wcs is not None) and (self.cfg['Telescope'].getboolean('force_solve', False) is False):
             self.log.info('Found existing wcs, skipping solve')
             nx, ny = self.action.args.kd.pixeldata[0].data.shape
             r, d = self.action.args.wcs.all_pix2world([nx/2.], [ny/2.], 1)
@@ -952,17 +954,17 @@ class AssociateCatalogStars(BasePrimitive):
 
         exptime = float(self.action.args.kd.get('EXPTIME'))
 
-        assoc_threshold = 1*u.arcsec
-        associated = Table(names=('RA', 'DEC', 'x', 'y', 'assoc_distance', 'mag', 'catflux', 'flux', 'flux2', 'instmag'),
-                           dtype=('f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8') )
+        assoc_threshold = self.cfg['Extract'].getfloat('accoc_radius', 1)*u.arcsec
+        associated = Table(names=('RA', 'DEC', 'x', 'y', 'assoc_distance', 'mag', 'catflux', 'flux', 'flux2', 'instmag', 'FWHM'),
+                           dtype=('f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8') )
 
         catalog_coords = c.SkyCoord(self.action.args.catalog['RA'], self.action.args.catalog['DEC'])
 
         band = 4760 # Jy (for i band)
         dl = 0.16 # dl/l (for i band)
-        d_telescope = self.cfg['VYSOS20'].getfloat('d_primary_mm', 508)
-        d_obstruction = self.cfg['VYSOS20'].getfloat('d_obstruction_mm', 127)
-        A = 3.14*(d_telescope/2)**2 - 3.14*(d_obstruction/2)**2 # m^2
+        d_telescope = self.cfg['Telescope'].getfloat('d_primary_mm', 508)
+        d_obstruction = self.cfg['Telescope'].getfloat('d_obstruction_mm', 127)
+        A = 3.14*(d_telescope/2/1000)**2 - 3.14*(d_obstruction/2/1000)**2 # m^2
         # 1 Jy = 1.51e7 photons sec^-1 m^-2 (dlambda/lambda)^-1
         # https://archive.is/20121204144725/http://www.astro.utoronto.ca/~patton/astro/mags.html#selection-587.2-587.19
         f0 = band * 1.51e7 * A * dl # photons / sec
@@ -982,9 +984,10 @@ class AssociateCatalogStars(BasePrimitive):
                                      'flux': detected['flux']/exptime,
                                      'instmag': -2.512*np.log(detected['flux']/exptime),
                                      'flux2': detected['flux2']/exptime,
+                                     'FWHM': detected['FWHM'],
                                      } )
         self.action.args.associated = associated if len(associated) > 0 else None
-        self.log.info(f'Associated {len(associated)} catalogs stars')
+        self.log.info(f'  Associated {len(associated)} catalogs stars')
 
         from astropy.modeling import models, fitting
         fit = fitting.LinearLSQFitter()
@@ -1089,7 +1092,7 @@ class Record(BasePrimitive):
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
         some_pre_condition = (not self.action.args.skip)\
-                         and (not self.cfg['VYSOS20'].getboolean('norecord', False))\
+                         and (not self.cfg['Telescope'].getboolean('norecord', False))\
                          and (self.action.args.images is not None)
 
         if some_pre_condition is True:
@@ -1137,6 +1140,7 @@ class Record(BasePrimitive):
                       'FWHM_pix': self.action.args.fwhm,
                       'ellipticity': self.action.args.ellipticity,
                       'n_stars': self.action.args.n_objects,
+                      'zero point': self.action.args.zero_point_fit.slope.value if self.action.args.zero_point_fit is not None else np.nan,
                       'analyzed': True,
                       'SIDREversion': 'n/a',
                      }
@@ -1278,7 +1282,7 @@ class SetOverwrite(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
         self.log.info(f"  Setting overwrite to True")
-        self.cfg.set('VYSOS20', 'overwrite', value='True')
+        self.cfg.set('Telescope', 'overwrite', value='True')
 
         return self.action.args
 

@@ -106,27 +106,32 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
 #     ax.set_xticks([])
 #     ax.set_yticks([])
 
-    plotpos = [ [ [0.010, 0.010, 0.580, 0.965], [0.600, 0.525, 0.375, 0.450] ],
-                [ None                        , [0.600, 0.050, 0.375, 0.425] ],
+    plotpos = [ [ [0.010, 0.010, 0.550, 0.965], [0.565, 0.725, 0.375, 0.250] ],
+                [ None                        , [0.565, 0.435, 0.375, 0.250] ],
+                [ None                        , [0.565, 0.035, 0.375, 0.360] ],
               ]
 
 
     ##-------------------------------------------------------------------------
     # Show JPEG of Image
     jpeg_axes = plt.axes(plotpos[0][0])
-    jpeg_axes.imshow(im, cmap=plt.cm.gray, vmin=vmin, vmax=vmax)
+    jpeg_axes.imshow(im, cmap=plt.cm.gray_r, vmin=vmin, vmax=vmax)
     jpeg_axes.set_xticks([])
     jpeg_axes.set_yticks([])
     jpeg_axes.set_title(f'{fitsfile}')
 
+    ##-------------------------------------------------------------------------
+    # Overlay Extracted (green)
     if cfg['jpeg'].getboolean('overplot_extracted', False) is True and objects is not None:
         radius = cfg['jpeg'].getfloat('extracted_radius', 6)
         for star in objects:
             if star['x'] > 0 and star['x'] < nx and star['y'] > 0 and star['y'] < ny:
                 c = plt.Circle((star['x'], star['y']), radius=radius,
-                               edgecolor='r', facecolor='none')
+                               edgecolor='g', facecolor='none')
                 jpeg_axes.add_artist(c)
 
+    ##-------------------------------------------------------------------------
+    # Overlay Catalog (blue)
     if cfg['jpeg'].getboolean('overplot_catalog', False) is True and catalog is not None:
         radius = cfg['jpeg'].getfloat('catalog_radius', 6)
         x, y = wcs.all_world2pix(catalog['RA'], catalog['DEC'], 1)
@@ -135,13 +140,17 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
                 c = plt.Circle(xy, radius=radius, edgecolor='b', facecolor='none')
                 jpeg_axes.add_artist(c)
 
+    ##-------------------------------------------------------------------------
+    # Overlay Associated (red)
     if cfg['jpeg'].getboolean('overplot_associated', False) is True and associated is not None:
         radius = cfg['jpeg'].getfloat('associated_radius', 6)
         for entry in associated:
             xy = (entry['x'], entry['y'])
-            c = plt.Circle(xy, radius=radius, edgecolor='g', facecolor='none')
+            c = plt.Circle(xy, radius=radius, edgecolor='r', facecolor='none')
             jpeg_axes.add_artist(c)
 
+    ##-------------------------------------------------------------------------
+    # Overlay Pointing
     if cfg['jpeg'].getboolean('overplot_pointing', False) is True\
         and header_pointing is not None\
         and wcs_pointing is not None:
@@ -169,16 +178,32 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
         avg_fwhm = np.median(objects['FWHM'])*pixel_scale
         fwhm_axes.set_title(f"FWHM = {avg_fwhm:.1f} arcsec")
         nstars, bins, p = fwhm_axes.hist(objects['FWHM']*pixel_scale,
-                                         bins=np.arange(1,7,0.25))
+                                         bins=np.arange(1,7,0.25),
+                                         color='b', alpha=0.5)
         fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.7)
         fwhm_axes.set_xlabel('FWHM (arcsec)')
         fwhm_axes.set_ylabel('N stars')
         fwhm_axes.set_ylim(0,max(nstars)*1.2)
+    if associated is not None:
+        nstars, bins, p = fwhm_axes.hist(associated['FWHM']*pixel_scale,
+                                         bins=np.arange(1,7,0.25),
+                                         color='g', alpha=0.5)
+        fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.7)
+
+    ##-------------------------------------------------------------------------
+    # Plot FWHM vs. Magnitude
+    if objects is not None:
+        fwhmmag_axes = plt.axes(plotpos[1][1])
+        fwhmmag_axes.plot(objects['FWHM']*pixel_scale, objects['flux2'], 'ko',
+                          mec=None, alpha=0.6)
+        fwhmmag_axes.set_xlabel('FWHM (arcsec)')
+        fwhmmag_axes.set_ylabel('Flux (e-)')
+        fwhmmag_axes.set_yscale('log')
 
     ##-------------------------------------------------------------------------
     # Plot instrumental mags
     if associated is not None:
-        mag_axes = plt.axes(plotpos[1][1])
+        mag_axes = plt.axes(plotpos[2][1])
         mag_axes.set_title(f"")
         mag_axes.plot(associated['catflux'], associated['flux'], 'go',
                       label='Source Extractor', mec=None, alpha=0.6)
@@ -195,7 +220,7 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
 #         plt.xlim(0,sorted(associated['catflux'])[-nclip])
 #         plt.ylim(0,sorted(associated['flux'])[-nclip])
         if zero_point_fit is not None:
-            label = f'slope={zero_point_fit.slope.value:.3g} e-/photon'
+            label = f'throughput={zero_point_fit.slope.value:.3g} e-/photon'
             mag_axes.plot(associated['catflux'],
                           zero_point_fit(associated['catflux']), 'r-',
                           label=label)
