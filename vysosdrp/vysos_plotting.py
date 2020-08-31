@@ -102,15 +102,11 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
         pixel_scale = cfg['VYSOS20'].getfloat('pixel_scale', 1)
 
     fig = plt.figure(figsize=(2*sx, 1*sy), dpi=dpi)
-#     ax = fig.gca()
-#     ax.set_xticks([])
-#     ax.set_yticks([])
 
     plotpos = [ [ [0.010, 0.010, 0.550, 0.965], [0.565, 0.725, 0.375, 0.250] ],
                 [ None                        , [0.565, 0.435, 0.375, 0.250] ],
                 [ None                        , [0.565, 0.035, 0.375, 0.360] ],
               ]
-
 
     ##-------------------------------------------------------------------------
     # Show JPEG of Image
@@ -118,11 +114,12 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
     jpeg_axes.imshow(im, cmap=plt.cm.gray_r, vmin=vmin, vmax=vmax)
     jpeg_axes.set_xticks([])
     jpeg_axes.set_yticks([])
-    jpeg_axes.set_title(f'{fitsfile}')
+    titlestr = f'{fitsfile}: '
 
     ##-------------------------------------------------------------------------
     # Overlay Extracted (green)
     if cfg['jpeg'].getboolean('overplot_extracted', False) is True and objects is not None:
+        titlestr += 'green=extracted '
         radius = cfg['jpeg'].getfloat('extracted_radius', 6)
         for star in objects:
             if star['x'] > 0 and star['x'] < nx and star['y'] > 0 and star['y'] < ny:
@@ -133,6 +130,7 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
     ##-------------------------------------------------------------------------
     # Overlay Catalog (blue)
     if cfg['jpeg'].getboolean('overplot_catalog', False) is True and catalog is not None:
+        titlestr += 'blue=catalog '
         radius = cfg['jpeg'].getfloat('catalog_radius', 6)
         x, y = wcs.all_world2pix(catalog['RA'], catalog['DEC'], 1)
         for xy in zip(x, y):
@@ -143,6 +141,7 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
     ##-------------------------------------------------------------------------
     # Overlay Associated (red)
     if cfg['jpeg'].getboolean('overplot_associated', False) is True and associated is not None:
+        titlestr += 'red=associated '
         radius = cfg['jpeg'].getfloat('associated_radius', 6)
         for entry in associated:
             xy = (entry['x'], entry['y'])
@@ -179,26 +178,29 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
         fwhm_axes.set_title(f"FWHM = {avg_fwhm:.1f} arcsec")
         nstars, bins, p = fwhm_axes.hist(objects['FWHM']*pixel_scale,
                                          bins=np.arange(1,7,0.25),
-                                         color='b', alpha=0.5)
-        fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.7)
+                                         color='g', alpha=0.5)
+        fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.5)
         fwhm_axes.set_xlabel('FWHM (arcsec)')
         fwhm_axes.set_ylabel('N stars')
         fwhm_axes.set_ylim(0,max(nstars)*1.2)
     if associated is not None:
         nstars, bins, p = fwhm_axes.hist(associated['FWHM']*pixel_scale,
                                          bins=np.arange(1,7,0.25),
-                                         color='g', alpha=0.5)
-        fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.7)
+                                         color='r', alpha=0.5)
+        fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.5)
 
     ##-------------------------------------------------------------------------
     # Plot FWHM vs. Magnitude
     if objects is not None:
         fwhmmag_axes = plt.axes(plotpos[1][1])
-        fwhmmag_axes.plot(objects['FWHM']*pixel_scale, objects['flux2'], 'ko',
+        fwhmmag_axes.plot(objects['FWHM']*pixel_scale, objects['flux2'], 'go',
                           mec=None, alpha=0.6)
         fwhmmag_axes.set_xlabel('FWHM (arcsec)')
         fwhmmag_axes.set_ylabel('Flux (e-)')
         fwhmmag_axes.set_yscale('log')
+    if associated is not None:
+        fwhmmag_axes.plot(associated['FWHM']*pixel_scale, associated['flux2'], 'ro',
+                          mec=None, alpha=0.6)
 
     ##-------------------------------------------------------------------------
     # Plot instrumental mags
@@ -226,6 +228,7 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
                           label=label)
         plt.legend(loc='best')
 
+    jpeg_axes.set_title(titlestr)
     reportfilename = f'{fitsfile.split(".")[0]}.jpg'
     reportfile = Path('/var/www/plots/V20/') / reportfilename
     plt.savefig(reportfile, dpi=dpi)
