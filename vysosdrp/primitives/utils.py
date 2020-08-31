@@ -763,8 +763,8 @@ class MoonInfo(BasePrimitive):
         altazframe = c.AltAz(location=loc, obstime=self.action.args.obstime,
                              temperature=temperature,
                              pressure=pressure)
-        moon = c.get_moon(self.action.args.obstime, location=loc)
-        sun = c.get_sun(self.action.args.obstime)
+        moon = c.get_moon(Time(self.action.args.obstime), location=loc)
+        sun = c.get_sun(Time(self.action.args.obstime))
 
         moon_alt = ((moon.transform_to(altazframe).alt).to(u.degree)).value
         moon_separation = (moon.separation(self.action.args.header_pointing).to(u.degree)).value\
