@@ -18,6 +18,7 @@ class QuickLookPipeline(BasePipeline):
     # modify the event table to use the events actually defined in the primitives
     event_table = {
         "update_directory": ("UpdateDirectory", "updating_directory", None),
+        "set_overwrite": ("SetOverwrite", "setting_overwrite", None),
 
         "next_file": ("ReadFITS", "file_ingested", "copy_data_locally"),
         "copy_data_locally": ("CopyDataLocally", "copying_data", "moon_info"),

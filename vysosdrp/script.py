@@ -93,10 +93,16 @@ def analyze_one():
                                    cfg.queue_manager_auth_code)
     if queue is None:
         print("Failed to connect to Queue Manager")
-    else:
+        return
+
+    if args.overwrite is True:
         pending = queue.get_pending()
-        event = Event("next_file", args)
+        event = Event("set_overwrite", args)
         queue.put(event)
+
+    pending = queue.get_pending()
+    event = Event("next_file", args)
+    queue.put(event)
 
 
 def watch_directory():

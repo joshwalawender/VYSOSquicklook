@@ -82,6 +82,7 @@ def query_mongo(db, collection, query):
 def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
                     objects=None, catalog=None, associated=None,
                     header_pointing=None, wcs_pointing=None,
+                    zero_point_fit=None,
                     ):
     '''Generate an report on the image. Contains the image itself with overlays
     and analysis plots.
@@ -179,10 +180,26 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
     if associated is not None:
         mag_axes = plt.axes(plotpos[1][1])
         mag_axes.set_title(f"")
-        mag_axes.plot(associated['mag'], associated['instmag'], 'ko')
-        mag_axes.set_xlabel('Catalog Mag')
-        mag_axes.set_ylabel('Instrumental Mag')
+        mag_axes.plot(associated['catflux'], associated['flux'], 'go',
+                      label='Source Extractor', mec=None, alpha=0.6)
+        mag_axes.plot(associated['catflux'], associated['flux2'], 'bo',
+                      label='photutils', mec=None, alpha=0.6)
+        mag_axes.set_xscale('log')
+        mag_axes.set_yscale('log')
+        mag_axes.invert_xaxis()
+        mag_axes.invert_yaxis()
+        mag_axes.set_xlabel('Estimated Catalog Flux (photons/s)')
+        mag_axes.set_ylabel('Measured Flux (electrons/s)')
         plt.grid()
+#         nclip = int(0.05*len(associated['catflux']))
+#         plt.xlim(0,sorted(associated['catflux'])[-nclip])
+#         plt.ylim(0,sorted(associated['flux'])[-nclip])
+        if zero_point_fit is not None:
+            label = f'slope={zero_point_fit.slope.value:.3g} e-/photon'
+            mag_axes.plot(associated['catflux'],
+                          zero_point_fit(associated['catflux']), 'r-',
+                          label=label)
+        plt.legend(loc='best')
 
     reportfilename = f'{fitsfile.split(".")[0]}.jpg'
     reportfile = Path('/var/www/plots/V20/') / reportfilename

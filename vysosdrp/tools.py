@@ -23,7 +23,7 @@ def get_catalog(pointing, radius, catalog='UCAC4', maglimit=None):
                   'Gaia': 'RA_ICRS'}
     dec_colname = {'UCAC4': '_DEJ2000',
                    'Gaia': 'DE_ICRS'}
-    mag_colname = {'UCAC4': 'rmag',
+    mag_colname = {'UCAC4': 'imag',
                    'Gaia': 'RPmag'}
     filter_string = '>0' if maglimit is None else f"<{maglimit}"
     column_filter = {mag_colname[catalog]: filter_string}

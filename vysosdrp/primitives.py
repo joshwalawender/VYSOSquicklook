@@ -64,6 +64,7 @@ class ReadFITS(BasePrimitive):
         self.action.args.zero_point = np.nan
         self.action.args.fitsfilepath = Path(self.action.args.name).expanduser().absolute()
         self.action.args.associated = None
+        self.action.args.zero_point_fit = None
 
         # If we are reading a compressed file, use the uncompressed version of
         # the name for the database
@@ -99,6 +100,7 @@ class ReadFITS(BasePrimitive):
             already_processed = [d for d in self.action.args.images.find( {'filename': self.action.args.fitsfile} )]
             if len(already_processed) != 0\
                and self.cfg['VYSOS20'].getboolean('overwrite', False) is False:
+                self.log.info(f"overwrite is {self.cfg['VYSOS20'].getboolean('overwrite')}")
                 self.log.info('  File is already in the database, skipping further processing')
                 self.action.args.skip = True
             if len(already_processed) != 0:
@@ -550,7 +552,7 @@ class SubtractBackground(BasePrimitive):
                                          mask=self.action.args.source_mask[i],
                                          sigma_clip=stats.SigmaClip())
             self.action.args.background[i] = bkg
-            self.action.args.kd.pixeldata[i].data -= bkg.background
+#             self.action.args.kd.pixeldata[i].data -= bkg.background
         return self.action.args
 
 
@@ -634,16 +636,17 @@ class ExtractStars(BasePrimitive):
         pixel_scale = self.cfg['VYSOS20'].getfloat('pixel_scale', 1)
         thresh = self.cfg['Extract'].getint('extract_threshold', 9)
         minarea = self.cfg['Extract'].getint('extract_minarea', 7)
-        mina = self.cfg['Extract'].getint('fwhm_mina', 1)
-        minb = self.cfg['Extract'].getint('fwhm_minb', 1)
+        mina = self.cfg['Extract'].getfloat('fwhm_mina', 1)
+        minb = self.cfg['Extract'].getfloat('fwhm_minb', 1)
 
-        pd = self.action.args.kd.pixeldata[0]
-        objects = sep.extract(pd.data, err=pd.uncertainty.array,
-                              mask=pd.mask,
+        bsub = self.action.args.kd.pixeldata[0].data - self.action.args.background[0].background
+        objects = sep.extract(bsub,
+                              err=self.action.args.kd.pixeldata[0].uncertainty.array,
+                              mask=self.action.args.kd.pixeldata[0].mask,
                               thresh=float(thresh), minarea=minarea)
         t = Table(objects)
 
-        ny, nx = pd.shape
+        ny, nx = bsub.shape
         r = np.sqrt((t['x']-nx/2.)**2 + (t['y']-ny/2.)**2)
         t.add_column(Column(data=r.data, name='r', dtype=np.float))
 
@@ -677,14 +680,20 @@ class ExtractStars(BasePrimitive):
             self.action.args.ellipticity = ellipticity
 
         ## Do second photometry measurement
-        positions = [(det['x'], det['y']) for det in self.action.args.objects[0:5]]
-        apertures = photutils.CircularAperture(positions, 5)
-        phot_table = photutils.aperture_photometry(pd.data, apertures)
+        positions = [(det['x'], det['y']) for det in self.action.args.objects]
+        star_apertures = photutils.CircularAperture(positions, int(FWHM_pix))
+        sky_apertures = photutils.CircularAnnulus(positions,
+                                                  r_in=int(FWHM_pix)+1, r_out=int(FWHM_pix)+3)
+        phot_table = photutils.aperture_photometry(
+                               self.action.args.kd.pixeldata[0],
+                               [star_apertures, sky_apertures])
+        bkg_mean = phot_table['aperture_sum_1'] / sky_apertures.area()
+        bkg_sum = bkg_mean * star_apertures.area()
+        final_sum = phot_table['aperture_sum_0'] - bkg_sum
+        phot_table['flux2'] = final_sum
+        self.action.args.objects.add_column(phot_table['flux2'])
 #         for i,entry in enumerate(phot_table):
-#             self.log.info(phot_table[i]['aperture_sum'])
-#             self.log.info(self.action.args.objects[i]['flux'])
-#             self.log.info(self.action.args.objects[i]['flux'] / phot_table[i]['aperture_sum'])
-
+#             self.log.info(self.action.args.objects[i]['flux'] / phot_table[i]['aperture_sum'])\
 
         return self.action.args
 
@@ -944,10 +953,20 @@ class AssociateCatalogStars(BasePrimitive):
         exptime = float(self.action.args.kd.get('EXPTIME'))
 
         assoc_threshold = 1*u.arcsec
-        associated = Table(names=('RA', 'DEC', 'x', 'y', 'assoc_distance', 'mag', 'flux', 'instmag'),
-                           dtype=('f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8') )
+        associated = Table(names=('RA', 'DEC', 'x', 'y', 'assoc_distance', 'mag', 'catflux', 'flux', 'flux2', 'instmag'),
+                           dtype=('f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8') )
 
         catalog_coords = c.SkyCoord(self.action.args.catalog['RA'], self.action.args.catalog['DEC'])
+
+        band = 4760 # Jy (for i band)
+        dl = 0.16 # dl/l (for i band)
+        d_telescope = self.cfg['VYSOS20'].getfloat('d_primary_mm', 508)
+        d_obstruction = self.cfg['VYSOS20'].getfloat('d_obstruction_mm', 127)
+        A = 3.14*(d_telescope/2)**2 - 3.14*(d_obstruction/2)**2 # m^2
+        # 1 Jy = 1.51e7 photons sec^-1 m^-2 (dlambda/lambda)^-1
+        # https://archive.is/20121204144725/http://www.astro.utoronto.ca/~patton/astro/mags.html#selection-587.2-587.19
+        f0 = band * 1.51e7 * A * dl # photons / sec
+
         for detected in self.action.args.objects:
             ra_deg, dec_deg = self.action.args.wcs.all_pix2world(detected['x'], detected['y'], 1)
             detected_coord = c.SkyCoord(ra_deg, dec_deg, frame='fk5', unit=(u.deg, u.deg))
@@ -959,26 +978,22 @@ class AssociateCatalogStars(BasePrimitive):
                                      'y': detected['y'],
                                      'assoc_distance': d2d[0].to(u.arcsec).value, 
                                      'mag': self.action.args.catalog[idx]['mag'],
-                                     'flux': detected['flux'],
-                                     'instmag': -2.512*np.log(detected['flux']/exptime)
+                                     'catflux': f0 * 10**(-self.action.args.catalog[idx]['mag']/2.512), # phot/sec
+                                     'flux': detected['flux']/exptime,
+                                     'instmag': -2.512*np.log(detected['flux']/exptime),
+                                     'flux2': detected['flux2']/exptime,
                                      } )
         self.action.args.associated = associated if len(associated) > 0 else None
         self.log.info(f'Associated {len(associated)} catalogs stars')
 
-        diffs = associated['instmag'] - associated['mag']
-        zp, zp_med, zp_std = stats.sigma_clipped_stats(diffs, sigma=5.0, iters=3)
-        self.log.info(f'  Zero Point (mean) = {zp:.2f}')
-        self.log.info(f'  Zero Point (median) = {zp_med:.2f}')
-        self.log.info(f'  Zero Point (std dev) = {zp_std:.2f}')
-        self.log.info(f'  Zero Point Uncertainty = {zp_std/len(diffs)**0.5:.2f}')
-        self.action.args.zero_point = zp
-
-#         from astropy.modeling import models, fitting
-#         fit = fitting.LinearLSQFitter()
-#         line_init = models.Linear1D()
-#         fitted_line = fit(line_init, associated['mag'], associated['instmag'])
-#         self.log.info(fitted_line)
-#         self.action.args.zero_point_fit = fitted_line
+        from astropy.modeling import models, fitting
+        fit = fitting.LinearLSQFitter()
+        line_init = models.Linear1D(slope=1, intercept=0)
+        line_init.intercept.fixed = True
+        fitted_line = fit(line_init, associated['catflux'], associated['flux2'])
+        nclip = int(0.05*len(associated['catflux']))
+        self.log.info(f"  Slope (ADU/photon) = {fitted_line.slope.value:.3g}")
+        self.action.args.zero_point_fit = fitted_line
 
         return self.action.args
 
@@ -1041,6 +1056,7 @@ class RenderJPEG(BasePrimitive):
                               associated=self.action.args.associated,
                               header_pointing=self.action.args.header_pointing,
                               wcs_pointing=self.action.args.wcs_pointing,
+                              zero_point_fit=self.action.args.zero_point_fit,
                               )
 
         return self.action.args
@@ -1215,6 +1231,57 @@ class UpdateDirectory(BasePrimitive):
         self.context.data_set.start_monitor()
 
         return self.action.args
+
+
+class SetOverwrite(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        """
+        Constructor
+        """
+        BasePrimitive.__init__(self, action, context)
+        # to use the pipeline logger instead of the framework logger, use this:
+        self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        some_pre_condition = True
+        if some_pre_condition is True:
+            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
+        else:
+            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
+        return some_pre_condition
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        some_post_condition = True
+        if some_post_condition is True:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
+        else:
+            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
+        return some_post_condition
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+        self.log.info(f"  Setting overwrite to True")
+        self.cfg.set('VYSOS20', 'overwrite', value='True')
+
+        return self.action.args
+
 
 
 # class Template(BasePrimitive):
