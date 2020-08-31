@@ -54,9 +54,9 @@ def setup_framework(args, pipeline=QuickLookPipeline):
         pipeline_config = ConfigClass(args.pipeline_config_file, default_section='DEFAULT')
 
     if args.overwrite is True:
-        pipeline_config.set('VYSOS20', 'overwrite', value='True')
+        pipeline_config.set('Telescope', 'overwrite', value='True')
     if args.norecord is True:
-        pipeline_config.set('VYSOS20', 'norecord', value='True')
+        pipeline_config.set('Telescope', 'norecord', value='True')
 
     # END HANDLING OF CONFIGURATION FILES ##########
 
