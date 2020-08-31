@@ -82,7 +82,7 @@ def query_mongo(db, collection, query):
 def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
                     objects=None, catalog=None, associated=None,
                     header_pointing=None, wcs_pointing=None,
-                    zero_point_fit=None,
+                    zero_point_fit=None, f0=None,
                     ):
     '''Generate an report on the image. Contains the image itself with overlays
     and analysis plots.
@@ -104,7 +104,7 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
     fig = plt.figure(figsize=(2*sx, 1*sy), dpi=dpi)
 
     plotpos = [ [ [0.010, 0.010, 0.550, 0.965], [0.565, 0.725, 0.375, 0.250] ],
-                [ None                        , [0.565, 0.435, 0.375, 0.250] ],
+                [ None                        , [0.565, 0.450, 0.375, 0.250] ],
                 [ None                        , [0.565, 0.035, 0.375, 0.360] ],
               ]
 
@@ -156,8 +156,8 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
         radius = cfg['jpeg'].getfloat('pointing_radius', 6)
         x, y = wcs.all_world2pix(header_pointing.ra.degree,
                                  header_pointing.dec.degree, 1)
-        jpeg_axes.plot([nx/2-radius,nx/2+radius], [ny/2,ny/2], 'y-', alpha=0.7)
-        jpeg_axes.plot([nx/2, nx/2], [ny/2-radius,ny/2+radius], 'y-', alpha=0.7)
+        jpeg_axes.plot([nx/2-3*radius,nx/2+3*radius], [ny/2,ny/2], 'k-', alpha=0.5)
+        jpeg_axes.plot([nx/2, nx/2], [ny/2-3*radius,ny/2+3*radius], 'k-', alpha=0.5)
         # Draw crosshair on target
         c = plt.Circle((x, y), radius=radius, edgecolor='g', alpha=0.7,
                        facecolor='none')
@@ -180,7 +180,6 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
                                          bins=np.arange(1,7,0.25),
                                          color='g', alpha=0.5)
         fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.5)
-        fwhm_axes.set_xlabel('FWHM (arcsec)')
         fwhm_axes.set_ylabel('N stars')
         fwhm_axes.set_ylim(0,max(nstars)*1.2)
     if associated is not None:
@@ -190,41 +189,52 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
         fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.5)
 
     ##-------------------------------------------------------------------------
-    # Plot FWHM vs. Magnitude
+    # Plot FWHM vs. Flux
     if objects is not None:
         fwhmmag_axes = plt.axes(plotpos[1][1])
         fwhmmag_axes.plot(objects['FWHM']*pixel_scale, objects['flux2'], 'go',
-                          mec=None, alpha=0.6)
-        fwhmmag_axes.set_xlabel('FWHM (arcsec)')
-        fwhmmag_axes.set_ylabel('Flux (e-)')
-        fwhmmag_axes.set_yscale('log')
+                          mec='none', alpha=0.3)
+        fwhmmag_axes.plot([avg_fwhm, avg_fwhm], [1,max(objects['flux2'].value)*1.5],
+                          'r-', alpha=0.5)
+        fwhmmag_axes.set_xlabel("FWHM (arcsec)")
+        fwhmmag_axes.set_ylabel(f"Flux (e-/s) [{max(objects['flux2']):.1f}]")
+        fwhmmag_axes.set_yscale("log")
     if associated is not None:
         fwhmmag_axes.plot(associated['FWHM']*pixel_scale, associated['flux2'], 'ro',
-                          mec=None, alpha=0.6)
+                          mec='none', alpha=0.3)
 
     ##-------------------------------------------------------------------------
     # Plot instrumental mags
     if associated is not None:
-        mag_axes = plt.axes(plotpos[2][1])
-        mag_axes.set_title(f"")
-        mag_axes.plot(associated['catflux'], associated['flux'], 'go',
+        flux_axes = plt.axes(plotpos[2][1])
+        flux_axes.plot(associated['catflux'], associated['flux'], 'go',
                       label='Source Extractor', mec=None, alpha=0.6)
-        mag_axes.plot(associated['catflux'], associated['flux2'], 'bo',
+        flux_axes.plot(associated['catflux'], associated['flux2'], 'bo',
                       label='photutils', mec=None, alpha=0.6)
-        mag_axes.set_xscale('log')
-        mag_axes.set_yscale('log')
-        mag_axes.invert_xaxis()
-        mag_axes.invert_yaxis()
-        mag_axes.set_xlabel('Estimated Catalog Flux (photons/s)')
-        mag_axes.set_ylabel('Measured Flux (electrons/s)')
+        flux_axes.set_xscale('log')
+        flux_axes.set_yscale('log')
+        flux_axes.invert_xaxis()
+        flux_axes.invert_yaxis()
+        flux_axes.set_xlabel('Estimated Catalog Flux (photons/s)')
+        flux_axes.set_ylabel('Measured Flux (e-/s)')
         plt.grid()
         if zero_point_fit is not None:
             label = f'throughput={zero_point_fit.slope.value:.3g} e-/photon'
-            mag_axes.plot(associated['catflux'],
+            flux_axes.plot(associated['catflux'],
                           zero_point_fit(associated['catflux']), 'r-',
                           label=label)
         plt.legend(loc='best')
 
+#         if f0 is not None:
+#             mag_axes = flux_axes.twiny()
+#             mag_axes.set_xlabel('Catalog Magnitude')
+#             minmag = np.floor(2.512*np.log10(f0/max(associated['catflux'])))
+#             maxmag = np.ceil(2.512*np.log10(f0/min(associated['catflux'])))
+#             mags = np.arange(minmag,maxmag,1)
+#             f = f0 * 10**(-mags/2.512)
+#             mag_axes.set_xticks(f)
+#             mag_axes.set_xticklabels([f"{m:.0f}" for m in mags])
+#             mag_axes.set_xlabel(f"{maxmag:.0f} {min(associated['catflux']):.2g}")
     jpeg_axes.set_title(titlestr)
     reportfilename = f'{fitsfile.split(".")[0]}.jpg'
     reportfile = Path('/var/www/plots/V20/') / reportfilename

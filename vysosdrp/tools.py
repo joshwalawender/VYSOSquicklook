@@ -66,15 +66,27 @@ def get_moon_info(lat=None, lon=None, height=None, temperature=None,
     return moon_alt, moon_separation, moon_illum
 
 
-def sigma_clipping_line_fit(xdata, ydata, intercept_fixed=False, nsigma=5):
+def sigma_clipping_line_fit(xdata, ydata, nsigma=5, maxiter=3, maxcleanfrac=0.2,
+                            intercept_fixed=False, intercept0=0, slope0=1):
+        npoints = len(xdata)
         fit = fitting.LinearLSQFitter()
-        line_init = models.Linear1D(slope=1, intercept=0)
+        line_init = models.Linear1D(slope=slope0, intercept=intercept0)
         line_init.intercept.fixed = intercept_fixed
         fitted_line = fit(line_init, xdata, ydata)
-
         deltas = ydata - fitted_line(xdata)
         mean, median, std = stats.sigma_clipped_stats(deltas)
-        cleaned = abs(deltas) < nsigma*std
-        
-        new_fit = fit(line_init, xdata[cleaned], ydata[cleaned])
-        return new_fit
+        cleaned = np.array(abs(deltas) < nsigma*std)
+        for iteration in range(1, maxiter):
+            last_std = std
+            cleaned = cleaned | np.array(abs(deltas) < nsigma*std)
+            if np.sum(cleaned)/npoints > maxcleanfrac:
+                return fitted_line
+            new_fit = fit(line_init, xdata[cleaned], ydata[cleaned])
+            deltas = ydata - new_fit(xdata)
+            mean, median, std = stats.sigma_clipped_stats(deltas)
+            if std >= last_std:
+                return new_fit
+            else:
+                fitted_line = new_fit
+
+        return fitted_line

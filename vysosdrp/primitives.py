@@ -65,6 +65,7 @@ class ReadFITS(BasePrimitive):
         self.action.args.fitsfilepath = Path(self.action.args.name).expanduser().absolute()
         self.action.args.associated = None
         self.action.args.zero_point_fit = None
+        self.action.args.f0 = None
 
         # If we are reading a compressed file, use the uncompressed version of
         # the name for the database
@@ -604,6 +605,8 @@ class ExtractStars(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
 
+        exptime = float(self.action.args.kd.get('EXPTIME'))
+
         # Photutils StarFinder
 #         extract_fwhm = self.cfg['Extract'].getfloat('extract_fwhm', 5)
 #         thresh = self.cfg['Extract'].getint('extract_threshold', 9)
@@ -645,6 +648,7 @@ class ExtractStars(BasePrimitive):
                               mask=self.action.args.kd.pixeldata[0].mask,
                               thresh=float(thresh), minarea=minarea)
         t = Table(objects)
+        t['flux'] /= exptime
 
         ny, nx = bsub.shape
         r = np.sqrt((t['x']-nx/2.)**2 + (t['y']-ny/2.)**2)
@@ -692,7 +696,7 @@ class ExtractStars(BasePrimitive):
         bkg_mean = phot_table['aperture_sum_1'] / sky_apertures.area()
         bkg_sum = bkg_mean * star_apertures.area()
         final_sum = phot_table['aperture_sum_0'] - bkg_sum
-        phot_table['flux2'] = final_sum
+        phot_table['flux2'] = final_sum/exptime
         self.action.args.objects.add_column(phot_table['flux2'])
 
         return self.action.args
@@ -950,9 +954,10 @@ class AssociateCatalogStars(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
 
-        exptime = float(self.action.args.kd.get('EXPTIME'))
-
-        assoc_radius = self.cfg['Extract'].getfloat('accoc_radius', 1)*u.arcsec
+        pixel_scale = self.cfg['Telescope'].getfloat('pixel_scale', 1) * u.arcsec/u.pix
+        assoc_radius = self.cfg['Extract'].getfloat('accoc_radius', 1)\
+                       * self.action.args.fwhm*u.pix\
+                       * pixel_scale
         associated = Table(names=('RA', 'DEC', 'x', 'y', 'assoc_distance', 'mag', 'catflux', 'flux', 'flux2', 'instmag', 'FWHM'),
                            dtype=('f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8') )
 
@@ -965,8 +970,9 @@ class AssociateCatalogStars(BasePrimitive):
         A = 3.14*(d_telescope/2/1000)**2 - 3.14*(d_obstruction/2/1000)**2 # m^2
         # 1 Jy = 1.51e7 photons sec^-1 m^-2 (dlambda/lambda)^-1
         # https://archive.is/20121204144725/http://www.astro.utoronto.ca/~patton/astro/mags.html#selection-587.2-587.19
-        f0 = band * 1.51e7 * A * dl # photons / sec
+        self.action.args.f0 = band * 1.51e7 * A * dl # photons / sec
 
+        self.log.info(self.action.args.objects.keys())
         for detected in self.action.args.objects:
             ra_deg, dec_deg = self.action.args.wcs.all_pix2world(detected['x'], detected['y'], 1)
             detected_coord = c.SkyCoord(ra_deg, dec_deg, frame='fk5', unit=(u.deg, u.deg))
@@ -978,10 +984,10 @@ class AssociateCatalogStars(BasePrimitive):
                                      'y': detected['y'],
                                      'assoc_distance': d2d[0].to(u.arcsec).value, 
                                      'mag': self.action.args.catalog[idx]['mag'],
-                                     'catflux': f0 * 10**(-self.action.args.catalog[idx]['mag']/2.512), # phot/sec
-                                     'flux': detected['flux']/exptime,
-                                     'instmag': -2.512*np.log(detected['flux']/exptime),
-                                     'flux2': detected['flux2']/exptime,
+                                     'catflux': self.action.args.f0 * 10**(-self.action.args.catalog[idx]['mag']/2.512), # phot/sec
+                                     'flux': detected['flux'],
+                                     'instmag': -2.512*np.log(detected['flux']),
+                                     'flux2': detected['flux2'],
                                      'FWHM': detected['FWHM'],
                                      } )
         self.action.args.associated = associated if len(associated) > 0 else None
@@ -1060,6 +1066,7 @@ class RenderJPEG(BasePrimitive):
                               header_pointing=self.action.args.header_pointing,
                               wcs_pointing=self.action.args.wcs_pointing,
                               zero_point_fit=self.action.args.zero_point_fit,
+                              f0=self.action.args.f0,
                               )
 
         return self.action.args
