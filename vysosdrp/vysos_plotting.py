@@ -103,9 +103,9 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
 
     fig = plt.figure(figsize=(2*sx, 1*sy), dpi=dpi)
 
-    plotpos = [ [ [0.010, 0.010, 0.550, 0.965], [0.565, 0.725, 0.375, 0.250] ],
-                [ None                        , [0.565, 0.450, 0.375, 0.250] ],
-                [ None                        , [0.565, 0.035, 0.375, 0.360] ],
+    plotpos = [ [ [0.010, 0.010, 0.550, 0.965], [0.565, 0.775, 0.375, 0.200] ],
+                [ None                        , [0.565, 0.540, 0.375, 0.200] ],
+                [ None                        , [0.565, 0.265, 0.375, 0.240] ],
               ]
 
     ##-------------------------------------------------------------------------
@@ -189,8 +189,25 @@ def generate_report(im, wcs, fitsfile=None, cfg=None, fwhm=None,
         fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.5)
 
     ##-------------------------------------------------------------------------
+    # Plot histogram of Sky Background
+#     if objects is not None:
+#         sky_axes = plt.axes(plotpos[0][1])
+#         avg_sky = np.median(objects['sky'].value)
+#         sky_axes.set_title(f"Sky Background = {avg_sky:.1f} e-/pix")
+#         lowsky = np.percentile(objects['sky'].value, 1)
+#         highsky = np.percentile(objects['sky'].value, 99)
+#         nstars, bins, p = sky_axes.hist(objects['sky'].value,
+#                                         bins=np.linspace(lowsky, highsky, 20),
+#                                         color='g', alpha=0.5)
+#         sky_axes.plot([avg_sky, avg_sky], [0,max(nstars)*1.2], 'r-', alpha=0.5)
+#         sky_axes.set_ylabel('N stars')
+#         sky_axes.set_ylim(0,max(nstars)*1.2)
+#         sky_axes.set_xlabel("Sky Background (e-/pix)")
+
+    ##-------------------------------------------------------------------------
     # Plot FWHM vs. Flux
     if objects is not None:
+        avg_fwhm = np.median(objects['FWHM'])*pixel_scale
         fwhmmag_axes = plt.axes(plotpos[1][1])
         fwhmmag_axes.plot(objects['FWHM']*pixel_scale, objects['flux2'], 'go',
                           mec='none', alpha=0.3)

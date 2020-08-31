@@ -693,8 +693,12 @@ class ExtractStars(BasePrimitive):
         phot_table = photutils.aperture_photometry(
                                self.action.args.kd.pixeldata[0],
                                [star_apertures, sky_apertures])
-        bkg_mean = phot_table['aperture_sum_1'] / sky_apertures.area()
-        bkg_sum = bkg_mean * star_apertures.area()
+        phot_table['sky'] = phot_table['aperture_sum_1'] / sky_apertures.area()
+        med_sky = np.median(phot_table['sky'])
+        self.log.info(f'  Median Sky = {med_sky.value:.0f} e-/pix')
+        self.action.args.sky_background = med_sky.value
+        self.action.args.objects.add_column(phot_table['sky'])
+        bkg_sum = phot_table['aperture_sum_1'] / sky_apertures.area() * star_apertures.area()
         final_sum = phot_table['aperture_sum_0'] - bkg_sum
         phot_table['flux2'] = final_sum/exptime
         self.action.args.objects.add_column(phot_table['flux2'])
@@ -1129,28 +1133,32 @@ class Record(BasePrimitive):
         self.log.info(f"Running {self.__class__.__name__} action")
 
         # Comple image info to store
-        self.image_info = {'filename': self.action.args.fitsfile,
-                      'telescope': self.action.args.kd.instrument,
-                      'compressed': Path(self.action.args.kd.fitsfilename).suffix == '.fz',
-                      'target name': self.action.args.kd.get('OBJECT'),
-                      'exptime': float(self.action.args.kd.get('EXPTIME')),
-                      'date': datetime.strptime(self.action.args.kd.get('DATE-OBS'), '%Y-%m-%dT%H:%M:%S'),
-                      'filter': self.action.args.kd.get('FILTER'),
-                      'az': float(self.action.args.kd.get('AZIMUTH')),
-                      'alt': float(self.action.args.kd.get('ALTITUDE')),
-                      'airmass': float(self.action.args.kd.get('AIRMASS')),
-                      'header_RA': self.action.args.header_pointing.ra.deg,
-                      'header_DEC': self.action.args.header_pointing.dec.deg,
-                      'moon_alt': self.action.args.moon_alt,
-                      'moon_separation': self.action.args.moon_separation,
-                      'moon_illumination': self.action.args.moon_illum,
-                      'FWHM_pix': self.action.args.fwhm,
-                      'ellipticity': self.action.args.ellipticity,
-                      'n_stars': self.action.args.n_objects,
-                      'zero point': self.action.args.zero_point_fit.slope.value if self.action.args.zero_point_fit is not None else np.nan,
-                      'analyzed': True,
-                      'SIDREversion': 'n/a',
-                     }
+        self.image_info = {
+            'filename': self.action.args.fitsfile,
+            'telescope': self.action.args.kd.instrument,
+            'compressed': Path(self.action.args.kd.fitsfilename).suffix == '.fz',
+            'target name': self.action.args.kd.get('OBJECT'),
+            'exptime': float(self.action.args.kd.get('EXPTIME')),
+            'date': datetime.strptime(self.action.args.kd.get('DATE-OBS'), '%Y-%m-%dT%H:%M:%S'),
+            'filter': self.action.args.kd.get('FILTER'),
+            'az': float(self.action.args.kd.get('AZIMUTH')),
+            'alt': float(self.action.args.kd.get('ALTITUDE')),
+            'airmass': float(self.action.args.kd.get('AIRMASS')),
+            'header_RA': self.action.args.header_pointing.ra.deg,
+            'header_DEC': self.action.args.header_pointing.dec.deg,
+            'moon_alt': self.action.args.moon_alt,
+            'moon_separation': self.action.args.moon_separation,
+            'moon_illumination': self.action.args.moon_illum,
+            'FWHM_pix': self.action.args.fwhm,
+            'ellipticity': self.action.args.ellipticity,
+            'n_stars': self.action.args.n_objects,
+            'analyzed': True,
+            'SIDREversion': 'n/a',
+            }
+        if self.action.args.zero_point_fit is not None:
+            self.image_info['zero point'] = self.action.args.zero_point_fit.slope.value
+        if self.action.args.sky_background is not None:
+            self.image_info['sky background'] = self.action.args.sky_background
         if self.action.args.perr is not None and not np.isnan(self.action.args.perr):
             self.image_info['perr_arcmin'] = self.action.args.perr.to(u.arcmin).value
         if self.action.args.wcs is not None:
