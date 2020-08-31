@@ -6,6 +6,8 @@ from astropy.time import Time
 from astropy.table import Table, Column
 import astropy.coordinates as c
 from astroquery.vizier import Vizier
+from astropy.modeling import models, fitting
+from astropy import stats
 
 from matplotlib import pyplot as plt
 
@@ -64,3 +66,15 @@ def get_moon_info(lat=None, lon=None, height=None, temperature=None,
     return moon_alt, moon_separation, moon_illum
 
 
+def sigma_clipping_line_fit(xdata, ydata, intercept_fixed=False, nsigma=5):
+        fit = fitting.LinearLSQFitter()
+        line_init = models.Linear1D(slope=1, intercept=0)
+        line_init.intercept.fixed = intercept_fixed
+        fitted_line = fit(line_init, xdata, ydata)
+
+        deltas = ydata - fitted_line(xdata)
+        mean, median, std = stats.sigma_clipped_stats(deltas)
+        cleaned = abs(deltas) < nsigma*std
+        
+        new_fit = fit(line_init, xdata[cleaned], ydata[cleaned])
+        return new_fit

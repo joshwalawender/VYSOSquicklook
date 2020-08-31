@@ -22,7 +22,7 @@ from keckdata import fits_reader, VYSOS20
 from keckdrpframework.primitives.base_primitive import BasePrimitive
 from keckdrpframework.models.arguments import Arguments
 
-from .tools import get_catalog, get_moon_info
+from .tools import get_catalog, get_moon_info, sigma_clipping_line_fit
 from .vysos_plotting import generate_report
 
 
@@ -987,12 +987,14 @@ class AssociateCatalogStars(BasePrimitive):
         self.action.args.associated = associated if len(associated) > 0 else None
         self.log.info(f'  Associated {len(associated)} catalogs stars')
 
-        from astropy.modeling import models, fitting
-        fit = fitting.LinearLSQFitter()
-        line_init = models.Linear1D(slope=1, intercept=0)
-        line_init.intercept.fixed = True
-        fitted_line = fit(line_init, associated['catflux'], associated['flux2'])
-        nclip = int(0.05*len(associated['catflux']))
+        fitted_line = sigma_clipping_line_fit(associated['catflux'], associated['flux2'], intercept_fixed=True)
+
+#         from astropy.modeling import models, fitting
+#         fit = fitting.LinearLSQFitter()
+#         line_init = models.Linear1D(slope=1, intercept=0)
+#         line_init.intercept.fixed = True
+#         fitted_line = fit(line_init, associated['catflux'], associated['flux2'])
+
         self.log.info(f"  Slope (ADU/photon) = {fitted_line.slope.value:.3g}")
         self.action.args.zero_point_fit = fitted_line
 
