@@ -24,6 +24,8 @@ from keckdata import fits_reader, VYSOS20
 from keckdrpframework.primitives.base_primitive import BasePrimitive
 from keckdrpframework.models.arguments import Arguments
 
+from .__init__ import pre_condition, post_condition
+
 
 ##-----------------------------------------------------------------------------
 ## Function: get_catalog
@@ -52,11 +54,14 @@ def get_catalog(pointing, radius, catalog='UCAC4', maglimit=None):
                column_filters=column_filter)
     v.ROW_LIMIT = 2e4
 
-    stars = Table(v.query_region(pointing, catalog=catalogs[catalog],
-                                 radius=c.Angle(radius, "deg"))[0])
-    stars.add_column( Column(data=stars[ra_colname[catalog]], name='RA') )
-    stars.add_column( Column(data=stars[dec_colname[catalog]], name='DEC') )
-    stars.add_column( Column(data=stars[mag_colname[catalog]], name='mag') )
+    try:
+        stars = Table(v.query_region(pointing, catalog=catalogs[catalog],
+                                     radius=c.Angle(radius, "deg"))[0])
+        stars.add_column( Column(data=stars[ra_colname[catalog]], name='RA') )
+        stars.add_column( Column(data=stars[dec_colname[catalog]], name='DEC') )
+        stars.add_column( Column(data=stars[mag_colname[catalog]], name='mag') )
+    except:
+        stars = None
     return stars
 
 
@@ -89,8 +94,6 @@ def sigma_clipping_line_fit(xdata, ydata, nsigma=5, maxiter=3, maxcleanfrac=0.2,
         return fitted_line
 
 
-
-
 ##-----------------------------------------------------------------------------
 ## Primitive: MakeSourceMask
 ##-----------------------------------------------------------------------------
@@ -106,43 +109,32 @@ class MakeSourceMask(BasePrimitive):
     - __call__
     """
 
-    def __init__(self, action, context, snr=5, npixels=5):
-        """
-        Constructor
-        """
+    def __init__(self, action, context):
         BasePrimitive.__init__(self, action, context)
-        # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
-        self.snr = snr
-        self.npixels = npixels
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = not self.action.args.skip
-        if some_pre_condition is True:
-            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-        else:
-            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
-        return some_pre_condition
+        checks = [pre_condition(self, 'Skip image is not set',
+                                not self.action.args.skip),
+                 ]
+        return np.all(checks)
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
-        some_post_condition = True
-        if some_post_condition is True:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
-        else:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
-        return some_post_condition
+        checks = []
+        return np.all(checks)
 
     def _perform(self):
         """
         Returns an Argument() with the parameters that depends on this operation.
         """
         self.log.info(f"Running {self.__class__.__name__} action")
-
-        self.action.args.source_mask = [None] * len(self.action.args.kd.pixeldata)
+        snr = 5
+        npixels = 5
+        self.action.args.source_mask = [None]*len(self.action.args.kd.pixeldata)
         for i,pd in enumerate(self.action.args.kd.pixeldata):
-            source_mask = photutils.make_source_mask(pd, self.snr, self.npixels)
+            source_mask = photutils.make_source_mask(pd, snr, npixels)
             self.action.args.source_mask[i] = source_mask
 
         return self.action.args
@@ -164,31 +156,21 @@ class ExtractStars(BasePrimitive):
     """
 
     def __init__(self, action, context):
-        """
-        Constructor
-        """
         BasePrimitive.__init__(self, action, context)
-        # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
         self.cfg = self.context.config.instrument
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = not self.action.args.skip
-        if some_pre_condition is True:
-            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-        else:
-            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
-        return some_pre_condition
+        checks = [pre_condition(self, 'FITS file exists',
+                                self.action.args.fitsfilepath.exists()),
+                 ]
+        return np.all(checks)
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
-        some_post_condition = True
-        if some_post_condition is True:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
-        else:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
-        return some_post_condition
+        checks = []
+        return np.all(checks)
 
     def _perform(self):
         """
@@ -234,10 +216,18 @@ class ExtractStars(BasePrimitive):
         minb = self.cfg['Extract'].getfloat('fwhm_minb', 1)
 
         bsub = self.action.args.kd.pixeldata[0].data - self.action.args.background[0].background
-        objects = sep.extract(bsub,
-                              err=self.action.args.kd.pixeldata[0].uncertainty.array,
-                              mask=self.action.args.kd.pixeldata[0].mask,
-                              thresh=float(thresh), minarea=minarea)
+        try:
+            objects = sep.extract(bsub,
+                                  err=self.action.args.kd.pixeldata[0].uncertainty.array,
+                                  mask=self.action.args.kd.pixeldata[0].mask,
+                                  thresh=float(thresh), minarea=minarea)
+        except Exception as e:
+            self.log.error('Source extractor failed')
+            self.log.error(e)
+            self.action.args.fwhm = np.nan
+            self.action.args.ellipticity = np.nan
+            return self.action.args
+
         t = Table(objects)
         t['flux'] /= exptime
 
@@ -313,45 +303,24 @@ class SolveAstrometry(BasePrimitive):
     """
 
     def __init__(self, action, context):
-        """
-        Constructor
-        """
         BasePrimitive.__init__(self, action, context)
-        # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
         self.cfg = self.context.config.instrument
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = not self.action.args.skip
-
-        if (self.action.args.wcs is not None) and (self.cfg['Telescope'].getboolean('force_solve', False) is False):
-            self.log.info('Found existing wcs, skipping solve')
-            nx, ny = self.action.args.kd.pixeldata[0].data.shape
-            r, d = self.action.args.wcs.all_pix2world([nx/2.], [ny/2.], 1)
-            self.action.args.wcs_pointing = c.SkyCoord(r[0], d[0], frame='fk5',
-                                              equinox='J2000',
-                                              unit=(u.deg, u.deg),
-                                              obstime=self.action.args.obstime)
-            self.action.args.perr = self.action.args.wcs_pointing.separation(
-                                         self.action.args.header_pointing)
-            self.log.info(f'Pointing error = {self.action.args.perr.to(u.arcmin):.1f}')
-            some_pre_condition = False
-
-        if some_pre_condition is True:
-            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-        else:
-            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
-        return some_pre_condition
+        checks = [pre_condition(self, 'Skip image is not set',
+                                not self.action.args.skip),
+                  pre_condition(self, 'WCS not already solved',
+                                (self.action.args.wcs is not None)\
+                                and (self.cfg['Telescope'].getboolean('force_solve', False) is False))
+                 ]
+        return np.all(checks)
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
-        some_post_condition = True
-        if some_post_condition is True:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
-        else:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
-        return some_post_condition
+        checks = []
+        return np.all(checks)
 
     def _perform(self):
         """
@@ -406,7 +375,7 @@ class SolveAstrometry(BasePrimitive):
         self.action.args.wcs_pointing = c.SkyCoord(r[0], d[0], frame='fk5',
                                           equinox='J2000',
                                           unit=(u.deg, u.deg),
-                                          obstime=self.action.args.obstime)
+                                          obstime=self.action.args.kd.obstime())
         self.action.args.perr = self.action.args.wcs_pointing.separation(
                                      self.action.args.header_pointing)
         self.log.info(f'Pointing error = {self.action.args.perr.to(u.arcmin):.1f}')
@@ -430,34 +399,27 @@ class GetCatalogStars(BasePrimitive):
     """
 
     def __init__(self, action, context):
-        """
-        Constructor
-        """
         BasePrimitive.__init__(self, action, context)
-        # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
         self.cfg = self.context.config.instrument
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = not self.action.args.skip and self.action.args.wcs is not None
-        if self.cfg['jpeg'].get('catalog', None) not in ['Gaia', 'UCAC4']:
-            self.log.debug(f"Only support Gaia and UCAC4 catalog")
-            some_pre_condition = False
-        if some_pre_condition is True:
-            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-        else:
-            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
-        return some_pre_condition
+        catalog = self.cfg['jpeg'].get('catalog', None)
+        known_catalogs = ['Gaia', 'UCAC4']
+        checks = [pre_condition(self, 'Skip image is not set',
+                                not self.action.args.skip),
+                  pre_condition(self, 'Found existing WCS',
+                                self.action.args.wcs is not None),
+                  pre_condition(self, f'Catalog {catalog} is known',
+                                catalog in known_catalogs),
+                 ]
+        return np.all(checks)
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
-        some_post_condition = True
-        if some_post_condition is True:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
-        else:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
-        return some_post_condition
+        checks = []
+        return np.all(checks)
 
     def _perform(self):
         """
@@ -482,7 +444,8 @@ class GetCatalogStars(BasePrimitive):
 
         self.log.info(f"Retrieving {catalogname} entries (magnitude < {maglimit})")
         self.action.args.catalog = get_catalog(pointing, radius, catalog=catalogname, maglimit=maglimit)
-        self.log.info(f"  Found {len(self.action.args.catalog)} catalog entries")
+        ncat = len(self.action.args.catalog) if self.action.args.catalog is not None else 0
+        self.log.info(f"  Found {ncat} catalog entries")
 
         return self.action.args
 
@@ -503,44 +466,30 @@ class AssociateCatalogStars(BasePrimitive):
     """
 
     def __init__(self, action, context):
-        """
-        Constructor
-        """
         BasePrimitive.__init__(self, action, context)
-        # to use the pipeline logger instead of the framework logger, use this:
         self.log = context.pipeline_logger
         self.cfg = self.context.config.instrument
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        some_pre_condition = not self.action.args.skip
-
         min_stars = 20
-
-        if self.action.args.objects is None:
-            some_pre_condition = False
-        elif len(self.action.args.objects) < min_stars:
-            some_pre_condition = False
-
-        if self.action.args.catalog is None:
-            some_pre_condition = False
-        elif len(self.action.args.catalog) < min_stars:
-            some_pre_condition = False
-
-        if some_pre_condition is True:
-            self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-        else:
-            self.log.warning(f"Precondition for {self.__class__.__name__} failed")
-        return some_pre_condition
+        checks = [pre_condition(self, 'Skip image is not set',
+                                not self.action.args.skip),
+                  pre_condition(self, 'Have extracted objects',
+                                self.action.args.objects is not None),
+                  pre_condition(self, f'Have extracted at least {min_stars} objects',
+                                len(self.action.args.objects) >= min_stars\
+                                if type(self.action.args.objects) is not None else False
+                                ),
+                  pre_condition(self, 'Have catalog objects',
+                                self.action.args.catalog is not None),
+                 ]
+        return np.all(checks)
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
-        some_post_condition = True
-        if some_post_condition is True:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
-        else:
-            self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
-        return some_post_condition
+        checks = []
+        return np.all(checks)
 
     def _perform(self):
         """
@@ -566,7 +515,7 @@ class AssociateCatalogStars(BasePrimitive):
         # https://archive.is/20121204144725/http://www.astro.utoronto.ca/~patton/astro/mags.html#selection-587.2-587.19
         self.action.args.f0 = band * 1.51e7 * A * dl # photons / sec
 
-        self.log.info(self.action.args.objects.keys())
+#         self.log.info(self.action.args.objects.keys())
         for detected in self.action.args.objects:
             ra_deg, dec_deg = self.action.args.wcs.all_pix2world(detected['x'], detected['y'], 1)
             detected_coord = c.SkyCoord(ra_deg, dec_deg, frame='fk5', unit=(u.deg, u.deg))
@@ -584,14 +533,63 @@ class AssociateCatalogStars(BasePrimitive):
                                      'flux2': detected['flux2'],
                                      'FWHM': detected['FWHM'],
                                      } )
-        self.action.args.associated = associated if len(associated) > 0 else None
+        if len(associated) == 0:
+            self.action.args.associated = None
+            return self.action.args
+
         self.log.info(f'  Associated {len(associated)} catalogs stars')
-
-        fitted_line = sigma_clipping_line_fit(associated['catflux'], associated['flux2'], intercept_fixed=True)
-
+        self.action.args.associated = associated
+        self.action.args.associated.sort('catflux')
+        nclip = int(np.floor(0.05*len(associated['catflux'])))
+        fitted_line = sigma_clipping_line_fit(associated['catflux'][nclip:-nclip],
+                                              associated['flux2'][nclip:-nclip],
+                                              intercept_fixed=True)
         self.log.info(f"  Slope (e-/photon) = {fitted_line.slope.value:.3g}")
         self.action.args.zero_point_fit = fitted_line
+        deltas = associated['flux2'] - fitted_line(associated['catflux'])
+        mean, med, std = stats.sigma_clipped_stats(deltas)
+        self.log.info(f"  Fit StdDev = {std:.2g}")
 
+        return self.action.args
+
+
+##-----------------------------------------------------------------------------
+## Primitive: ImageStats
+##-----------------------------------------------------------------------------
+class ImageStats(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        BasePrimitive.__init__(self, action, context)
+        self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        checks = []
+        return np.all(checks)
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        checks = []
+        return np.all(checks)
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+
+        self.action.args.image_stats = (stats.sigma_clipped_stats(self.action.args.kd.pixeldata[0]))
         return self.action.args
 
 
@@ -608,31 +606,19 @@ class AssociateCatalogStars(BasePrimitive):
 #     """
 # 
 #     def __init__(self, action, context):
-#         """
-#         Constructor
-#         """
 #         BasePrimitive.__init__(self, action, context)
-#         # to use the pipeline logger instead of the framework logger, use this:
 #         self.log = context.pipeline_logger
 #         self.cfg = self.context.config.instrument
 # 
 #     def _pre_condition(self):
 #         """Check for conditions necessary to run this process"""
-#         some_pre_condition = not self.action.args.skip
-#         if some_pre_condition is True:
-#             self.log.debug(f"Precondition for {self.__class__.__name__} is satisfied")
-#         else:
-#             self.log.warning(f"Precondition for {self.__class__.__name__} failed")
-#         return some_pre_condition
+#         checks = []
+#         return np.all(checks)
 # 
 #     def _post_condition(self):
 #         """Check for conditions necessary to verify that the process run correctly"""
-#         some_post_condition = True
-#         if some_post_condition is True:
-#             self.log.debug(f"Postcondition for {self.__class__.__name__} satisfied")
-#         else:
-#             self.log.debug(f"Postcondition for {self.__class__.__name__} failed")
-#         return some_post_condition
+#         checks = []
+#         return np.all(checks)
 # 
 #     def _perform(self):
 #         """

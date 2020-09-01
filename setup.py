@@ -31,7 +31,7 @@ entry_points = {
     'console_scripts': [
         "analyzeone = vysosdrp.script:analyze_one",
         "watchdirectory = vysosdrp.script:watch_directory",
-        "make_nightly_plot = vysosdrp.vysos_plotting:make_nightly_plot",
+        "make_nightly_plot = vysosdrp.primitives.make_nightly_plot:main",
         "qlcd = vysosdrp.script:change_directory",
     ]
 }
