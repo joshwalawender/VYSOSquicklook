@@ -23,7 +23,7 @@ from keckdata import fits_reader, VYSOS20
 from keckdrpframework.primitives.base_primitive import BasePrimitive
 from keckdrpframework.models.arguments import Arguments
 
-from .__init__ import pre_condition, post_condition
+from .utils import pre_condition, post_condition
 
 
 ##-----------------------------------------------------------------------------
@@ -45,7 +45,6 @@ class ReadFITS(BasePrimitive):
         BasePrimitive.__init__(self, action, context)
         self.log = context.pipeline_logger
         self.log.info("")
-        self.log.info(f"Initializing {self.__class__.__name__}")
         self.cfg = self.context.config.instrument
         # initialize values in the args for general use
         self.action.args.db_entry = None
@@ -100,6 +99,7 @@ class ReadFITS(BasePrimitive):
                 self.action.args.skip = True
 
         # Read FITS file
+        self.log.info(f'  Reading: {self.action.args.fitsfile}')
         self.action.args.kd = fits_reader(self.action.args.fitsfilepath,
                                           datatype=VYSOS20)
 
@@ -126,6 +126,7 @@ class PrepareScience(BasePrimitive):
         self.log = context.pipeline_logger
         self.cfg = self.context.config.instrument
         # initialize values in the args for use with science frames
+        self.action.args.background = None
         self.action.args.objects = None
         self.action.args.wcs_pointing = None
         self.action.args.perr = np.nan
@@ -169,10 +170,13 @@ class PrepareScience(BasePrimitive):
         if self.action.args.images is not None:
             already_processed = [d for d in self.action.args.images.find( {'filename': self.action.args.fitsfile} )]
             if len(already_processed) != 0:
+                self.log.info(f'  Found {len(already_processed)} database entries for this file')
                 self.action.args.db_entry = already_processed[0]
-                if self.action.args.db_entry.get('wcs', None) is not None:
+                if self.action.args.db_entry.get('wcs', None) is None:
+                    self.log.info('  Database entry does not contain WCS')
+                else:
                     self.action.args.wcs = WCS(self.action.args.db_entry.get('wcs'))
-                    self.log.info('Found Previously Solved WCS')
+                    self.log.info('  Found Previously Solved WCS')
                     nx, ny = self.action.args.kd.pixeldata[0].data.shape
                     r, d = self.action.args.wcs.all_pix2world([nx/2.], [ny/2.], 1)
                     self.action.args.wcs_pointing = c.SkyCoord(r[0], d[0], frame='fk5',
@@ -181,7 +185,7 @@ class PrepareScience(BasePrimitive):
                                                       obstime=self.action.args.kd.obstime())
                     self.action.args.perr = self.action.args.wcs_pointing.separation(
                                                  self.action.args.header_pointing)
-                    self.log.info(f'Pointing error = {self.action.args.perr.to(u.arcmin):.1f}')
+                    self.log.info(f'  Pointing error = {self.action.args.perr.to(u.arcmin):.1f}')
 
         # Find master bias file
         master_directory = self.cfg['Calibrations'].get('DirectoryForMasters', None)
@@ -195,13 +199,23 @@ class PrepareScience(BasePrimitive):
                 self.log.info(f"  Found master bias file: {bias_file.name}")
                 self.action.args.master_bias_file = bias_file
             else:
-                # Look for bias from last UT date
-                date_string = (self.action.args.kd.obstime()-timedelta(1)).strftime('%Y%m%dUT')
-                bias_file = master_directory.joinpath(f'MasterBias_{date_string}.fits')
-                if bias_file.exists() is True:
-                    self.log.info(f"  Found master bias file: {bias_file.name}")
-                    self.action.args.master_bias_file = bias_file
-                else:
+                # Look for bias within 10 days
+                count = 0
+                while bias_file.exists() is False and count <= 10:
+                    count += 1
+                    # Days before
+                    date_string = (self.action.args.kd.obstime()-timedelta(count)).strftime('%Y%m%dUT')
+                    bias_file = master_directory.joinpath(f'MasterBias_{date_string}.fits')
+                    if bias_file.exists() is True:
+                        self.log.info(f"  Found master bias file: {bias_file.name}")
+                        self.action.args.master_bias_file = bias_file
+                    # Days after
+                    date_string = (self.action.args.kd.obstime()+timedelta(count)).strftime('%Y%m%dUT')
+                    bias_file = master_directory.joinpath(f'MasterBias_{date_string}.fits')
+                    if bias_file.exists() is True:
+                        self.log.info(f"  Found master bias file: {bias_file.name}")
+                        self.action.args.master_bias_file = bias_file
+                if bias_file.exists() is False:
                     self.log.info(f"  Failed to find master bias file")
                     self.action.args.master_bias_file = None
 
@@ -490,40 +504,3 @@ class StackBiases(BasePrimitive):
         combined_bias.write(combined_bias_filepath.joinpath(combined_bias_filename))
 
         return self.action.args
-
-
-# class Template(BasePrimitive):
-#     """
-#     This is a template for primitives, which is usually an action.
-# 
-#     The methods in the base class can be overloaded:
-#     - _pre_condition
-#     - _post_condition
-#     - _perform
-#     - apply
-#     - __call__
-#     """
-# 
-#     def __init__(self, action, context):
-#         BasePrimitive.__init__(self, action, context)
-#         self.log = context.pipeline_logger
-#         self.cfg = self.context.config.instrument
-# 
-#     def _pre_condition(self):
-#         """Check for conditions necessary to run this process"""
-#         checks = []
-#         return np.all(checks)
-# 
-#     def _post_condition(self):
-#         """Check for conditions necessary to verify that the process run correctly"""
-#         checks = []
-#         return np.all(checks)
-# 
-#     def _perform(self):
-#         """
-#         Returns an Argument() with the parameters that depends on this operation.
-#         """
-#         self.log.info(f"Running {self.__class__.__name__} action")
-# 
-#         return self.action.args
-

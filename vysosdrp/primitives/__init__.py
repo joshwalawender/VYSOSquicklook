@@ -1,34 +1,9 @@
 import logging
 from .analysis import *
 from .image_operations import *
+from .graphics import *
 from .utils import *
-
-
-##-----------------------------------------------------------------------------
-## Evaluate pre and post conditions
-##-----------------------------------------------------------------------------
-def pre_condition(primitive, name, condition,
-                  fail_level=logging.WARNING,
-                  success_level=logging.DEBUG):
-    if condition is True:
-        primitive.log.log(success_level,
-            f'Precondition "{name}" for {primitive.__class__.__name__} satisfied')
-    else:
-        primitive.log.log(fail_level,
-            f'Precondition "{name}" for {primitive.__class__.__name__} failed')
-    return condition
-
-
-def post_condition(primitive, name, condition,
-                   fail_level=logging.WARNING,
-                   success_level=logging.DEBUG):
-    if condition is True:
-        primitive.log.log(success_level,
-            f'Postcondition "{name}" for {primitive.__class__.__name__} satisfied')
-    else:
-        primitive.log.log(fail_level,
-            f'Postcondition "{name}" for {primitive.__class__.__name__} failed')
-    return condition
+from .file_handling import *
 
 
 ##-----------------------------------------------------------------------------
@@ -94,4 +69,42 @@ def query_mongo(db, collection, query):
         result.add_row(insert)
     return result
 
+
+##-----------------------------------------------------------------------------
+## Primitive: Template
+##-----------------------------------------------------------------------------
+# class Template(BasePrimitive):
+#     """
+#     This is a template for primitives, which is usually an action.
+# 
+#     The methods in the base class can be overloaded:
+#     - _pre_condition
+#     - _post_condition
+#     - _perform
+#     - apply
+#     - __call__
+#     """
+# 
+#     def __init__(self, action, context):
+#         BasePrimitive.__init__(self, action, context)
+#         self.log = context.pipeline_logger
+#         self.cfg = self.context.config.instrument
+# 
+#     def _pre_condition(self):
+#         """Check for conditions necessary to run this process"""
+#         checks = []
+#         return np.all(checks)
+# 
+#     def _post_condition(self):
+#         """Check for conditions necessary to verify that the process run correctly"""
+#         checks = []
+#         return np.all(checks)
+# 
+#     def _perform(self):
+#         """
+#         Returns an Argument() with the parameters that depends on this operation.
+#         """
+#         self.log.info(f"Running {self.__class__.__name__} action")
+# 
+#         return self.action.args
 

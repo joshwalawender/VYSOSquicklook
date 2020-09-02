@@ -24,7 +24,7 @@ from keckdata import fits_reader, VYSOS20
 from keckdrpframework.primitives.base_primitive import BasePrimitive
 from keckdrpframework.models.arguments import Arguments
 
-from .__init__ import pre_condition, post_condition
+from .utils import pre_condition, post_condition
 
 
 ##-----------------------------------------------------------------------------
@@ -95,6 +95,75 @@ def sigma_clipping_line_fit(xdata, ydata, nsigma=5, maxiter=3, maxcleanfrac=0.2,
 
 
 ##-----------------------------------------------------------------------------
+## Primitive: MoonInfo
+##-----------------------------------------------------------------------------
+class MoonInfo(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        BasePrimitive.__init__(self, action, context)
+        self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        checks = [pre_condition(self, 'Skip image is not set',
+                                not self.action.args.skip),
+                 ]
+        return np.all(checks)
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        checks = []
+        return np.all(checks)
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+
+        lat=c.Latitude(self.action.args.kd.get('SITELAT'), unit=u.degree)
+        lon=c.Longitude(self.action.args.kd.get('SITELONG'), unit=u.degree)
+        height=float(self.action.args.kd.get('ALT-OBS')) * u.meter
+        loc = c.EarthLocation(lon, lat, height)
+        temperature=float(self.action.args.kd.get('AMBTEMP'))*u.Celsius
+        pressure=self.cfg['Telescope'].getfloat('pressure', 700)*u.mbar
+        altazframe = c.AltAz(location=loc, obstime=self.action.args.kd.obstime(),
+                             temperature=temperature,
+                             pressure=pressure)
+        moon = c.get_moon(Time(self.action.args.kd.obstime()), location=loc)
+        sun = c.get_sun(Time(self.action.args.kd.obstime()))
+
+        moon_alt = ((moon.transform_to(altazframe).alt).to(u.degree)).value
+        moon_separation = (moon.separation(self.action.args.header_pointing).to(u.degree)).value\
+                    if self.action.args.header_pointing is not None else None
+
+        # Moon illumination formula from Meeus, “Astronomical 
+        # Algorithms". Formulae 46.1 and 46.2 in the 1991 edition, 
+        # using the approximation cos(psi) \approx -cos(i). Error 
+        # should be no more than 0.0014 (p. 316). 
+        moon_illum = 50*(1 - np.sin(sun.dec.radian)*np.sin(moon.dec.radian)\
+                     - np.cos(sun.dec.radian)*np.cos(moon.dec.radian)\
+                     * np.cos(sun.ra.radian-moon.ra.radian))
+
+        self.action.args.moon_alt = moon_alt
+        self.action.args.moon_separation = moon_separation
+        self.action.args.moon_illum = moon_illum
+
+        return self.action.args
+
+
+##-----------------------------------------------------------------------------
 ## Primitive: MakeSourceMask
 ##-----------------------------------------------------------------------------
 class MakeSourceMask(BasePrimitive):
@@ -162,8 +231,10 @@ class ExtractStars(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        checks = [pre_condition(self, 'FITS file exists',
-                                self.action.args.fitsfilepath.exists()),
+        checks = [pre_condition(self, 'Skip image is not set',
+                                not self.action.args.skip),
+                  pre_condition(self, 'Background has been generated',
+                                self.action.args.background is not None),
                  ]
         return np.all(checks)
 
@@ -280,9 +351,12 @@ class ExtractStars(BasePrimitive):
         self.action.args.sky_background = med_sky.value
         self.action.args.objects.add_column(phot_table['sky'])
         bkg_sum = phot_table['aperture_sum_1'] / sky_apertures.area() * star_apertures.area()
-        final_sum = phot_table['aperture_sum_0'] - bkg_sum
-        phot_table['flux2'] = final_sum/exptime
+        final_sum = (phot_table['aperture_sum_0'] - bkg_sum)/exptime
+        where_bad = (final_sum <= 0)
+        phot_table['flux2'] = final_sum
         self.action.args.objects.add_column(phot_table['flux2'])
+        self.action.args.objects = self.action.args.objects[~where_bad]
+        self.log.info(f'  Fluxes for {self.action.args.n_objects:d} stars')
 
         return self.action.args
 
@@ -312,10 +386,10 @@ class SolveAstrometry(BasePrimitive):
         checks = [pre_condition(self, 'Skip image is not set',
                                 not self.action.args.skip),
                   pre_condition(self, 'WCS not already solved',
-                                (self.action.args.wcs is not None)\
-                                and (self.cfg['Telescope'].getboolean('force_solve', False) is False))
+                                self.action.args.wcs is None),
                  ]
-        return np.all(checks)
+        force_solve = self.cfg['Telescope'].getboolean('force_solve', False)
+        return np.all(checks) if force_solve is False else True
 
     def _post_condition(self):
         """Check for conditions necessary to verify that the process run correctly"""
@@ -472,15 +546,10 @@ class AssociateCatalogStars(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        min_stars = 20
         checks = [pre_condition(self, 'Skip image is not set',
                                 not self.action.args.skip),
                   pre_condition(self, 'Have extracted objects',
                                 self.action.args.objects is not None),
-                  pre_condition(self, f'Have extracted at least {min_stars} objects',
-                                len(self.action.args.objects) >= min_stars\
-                                if type(self.action.args.objects) is not None else False
-                                ),
                   pre_condition(self, 'Have catalog objects',
                                 self.action.args.catalog is not None),
                  ]
@@ -591,40 +660,4 @@ class ImageStats(BasePrimitive):
 
         self.action.args.image_stats = (stats.sigma_clipped_stats(self.action.args.kd.pixeldata[0]))
         return self.action.args
-
-
-# class Template(BasePrimitive):
-#     """
-#     This is a template for primitives, which is usually an action.
-# 
-#     The methods in the base class can be overloaded:
-#     - _pre_condition
-#     - _post_condition
-#     - _perform
-#     - apply
-#     - __call__
-#     """
-# 
-#     def __init__(self, action, context):
-#         BasePrimitive.__init__(self, action, context)
-#         self.log = context.pipeline_logger
-#         self.cfg = self.context.config.instrument
-# 
-#     def _pre_condition(self):
-#         """Check for conditions necessary to run this process"""
-#         checks = []
-#         return np.all(checks)
-# 
-#     def _post_condition(self):
-#         """Check for conditions necessary to verify that the process run correctly"""
-#         checks = []
-#         return np.all(checks)
-# 
-#     def _perform(self):
-#         """
-#         Returns an Argument() with the parameters that depends on this operation.
-#         """
-#         self.log.info(f"Running {self.__class__.__name__} action")
-# 
-#         return self.action.args
 
