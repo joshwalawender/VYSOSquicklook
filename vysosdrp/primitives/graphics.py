@@ -69,14 +69,6 @@ class RenderJPEG(BasePrimitive):
         self.log.info(f"Running {self.__class__.__name__} action")
 
         im = self.action.args.kd.pixeldata[0].data
-        wcs = self.action.args.wcs
-        fitsfile = self.action.args.fitsfile
-        objects = self.action.args.objects
-        catalog = self.action.args.catalog
-        associated = self.action.args.associated
-        header_pointing = self.action.args.header_pointing
-        wcs_pointing = self.action.args.wcs_pointing
-        zero_point_fit = self.action.args.zero_point_fit
 
         plt.rcParams.update({'font.size': 24})
         binning = self.cfg['jpeg'].getint('binning', 1)
@@ -87,8 +79,8 @@ class RenderJPEG(BasePrimitive):
         sx = nx/dpi/binning
         sy = ny/dpi/binning
 
-        if wcs is not None:
-            pixel_scale = np.mean(proj_plane_pixel_scales(wcs))*60*60
+        if self.action.args.wcs is not None:
+            pixel_scale = np.mean(proj_plane_pixel_scales(self.action.args.wcs))*60*60
         else:
             pixel_scale = self.cfg['Telescope'].getfloat('pixel_scale', 1)
 
@@ -106,14 +98,14 @@ class RenderJPEG(BasePrimitive):
         jpeg_axes.imshow(im, cmap=plt.cm.gray_r, vmin=vmin, vmax=vmax)
         jpeg_axes.set_xticks([])
         jpeg_axes.set_yticks([])
-        titlestr = f'{fitsfile}: '
+        titlestr = f'{self.action.args.fitsfile}: '
 
         ##-------------------------------------------------------------------------
         # Overlay Extracted (green)
-        if self.cfg['jpeg'].getboolean('overplot_extracted', False) is True and objects is not None:
+        if self.cfg['jpeg'].getboolean('overplot_extracted', False) is True and self.action.args.objects is not None:
             titlestr += 'green=extracted '
             radius = self.cfg['jpeg'].getfloat('extracted_radius', 6)
-            for star in objects:
+            for star in self.action.args.objects:
                 if star['x'] > 0 and star['x'] < nx and star['y'] > 0 and star['y'] < ny:
                     c = plt.Circle((star['x'], star['y']), radius=radius,
                                    edgecolor='g', facecolor='none')
@@ -121,10 +113,10 @@ class RenderJPEG(BasePrimitive):
 
         ##-------------------------------------------------------------------------
         # Overlay Catalog (blue)
-        if self.cfg['jpeg'].getboolean('overplot_catalog', False) is True and catalog is not None and wcs is not None:
+        if self.cfg['jpeg'].getboolean('overplot_catalog', False) is True and self.action.args.catalog is not None and self.action.args.wcs is not None:
             titlestr += 'blue=catalog '
             radius = self.cfg['jpeg'].getfloat('catalog_radius', 6)
-            x, y = wcs.all_world2pix(catalog['RA'], catalog['DEC'], 1)
+            x, y = self.action.args.wcs.all_world2pix(self.action.args.catalog['RA'], self.action.args.catalog['DEC'], 1)
             for xy in zip(x, y):
                 if xy[0] > 0 and xy[0] < nx and xy[1] > 0 and xy[1] < ny:
                     c = plt.Circle(xy, radius=radius, edgecolor='b', facecolor='none')
@@ -132,10 +124,10 @@ class RenderJPEG(BasePrimitive):
 
         ##-------------------------------------------------------------------------
         # Overlay Associated (red)
-        if self.cfg['jpeg'].getboolean('overplot_associated', False) is True and associated is not None and wcs is not None:
+        if self.cfg['jpeg'].getboolean('overplot_associated', False) is True and self.action.args.associated is not None and self.action.args.wcs is not None:
             titlestr += 'red=associated '
             radius = self.cfg['jpeg'].getfloat('associated_radius', 6)
-            for entry in associated:
+            for entry in self.action.args.associated:
                 xy = (entry['x'], entry['y'])
                 c = plt.Circle(xy, radius=radius, edgecolor='r', facecolor='none')
                 jpeg_axes.add_artist(c)
@@ -143,11 +135,12 @@ class RenderJPEG(BasePrimitive):
         ##-------------------------------------------------------------------------
         # Overlay Pointing
         if self.cfg['jpeg'].getboolean('overplot_pointing', False) is True\
-            and header_pointing is not None\
-            and wcs_pointing is not None:
+            and self.action.args.header_pointing is not None\
+            and self.action.args.wcs is not None\
+            and self.action.args.wcs_pointing is not None:
             radius = self.cfg['jpeg'].getfloat('pointing_radius', 6)
-            x, y = wcs.all_world2pix(header_pointing.ra.degree,
-                                     header_pointing.dec.degree, 1)
+            x, y = self.action.args.wcs.all_world2pix(self.action.args.header_pointing.ra.degree,
+                                     self.action.args.header_pointing.dec.degree, 1)
             jpeg_axes.plot([nx/2-3*radius,nx/2+3*radius], [ny/2,ny/2], 'k-', alpha=0.5)
             jpeg_axes.plot([nx/2, nx/2], [ny/2-3*radius,ny/2+3*radius], 'k-', alpha=0.5)
             # Draw crosshair on target
@@ -163,34 +156,49 @@ class RenderJPEG(BasePrimitive):
         jpeg_axes.set_ylim(0,ny)
 
         ##-------------------------------------------------------------------------
+        ## Histogram of Pixel Values (for flats)
+        if self.action.args.objects is None:
+#             pixel_axes = plt.axes(plotpos[0][1])
+            pixel_axes = plt.axes([0.565, 0.540, 0.375, 0.430])
+            mean, med, std = stats.sigma_clipped_stats(im)
+            p1, p99 = np.percentile(im, 1), np.percentile(im, 99)
+            pixel_axes.set_title(f"Histogram of Pixel Values (median = {med:.0f})")
+            npix, bins, p = pixel_axes.hist(im.ravel(), color='b', alpha=0.5,
+                                            bins=np.linspace(p1,p99,50))
+            pixel_axes.plot([med, med], [0,max(npix)*1.2], 'r-', alpha=0.5)
+            pixel_axes.set_xlabel('e-/s')
+            pixel_axes.set_ylabel('N Pix')
+            pixel_axes.set_ylim(0,max(npix)*1.2)
+
+        ##-------------------------------------------------------------------------
         # Plot histogram of FWHM
-        if objects is not None:
+        if self.action.args.objects is not None:
             fwhm_axes = plt.axes(plotpos[0][1])
             minfwhm = 1
             maxfwhm = 7
-            avg_fwhm = np.median(objects['FWHM'])*pixel_scale
+            avg_fwhm = np.median(self.action.args.objects['FWHM'])*pixel_scale
             fwhm_axes.set_title(f"FWHM = {avg_fwhm:.1f} arcsec")
-            nstars, bins, p = fwhm_axes.hist(objects['FWHM']*pixel_scale,
+            nstars, bins, p = fwhm_axes.hist(self.action.args.objects['FWHM']*pixel_scale,
                                              bins=np.arange(minfwhm,maxfwhm,0.25),
                                              color='g', alpha=0.5)
             fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.5)
             fwhm_axes.set_ylabel('N stars')
             fwhm_axes.set_ylim(0,max(nstars)*1.2)
-        if associated is not None:
-            nstars, bins, p = fwhm_axes.hist(associated['FWHM']*pixel_scale,
+        if self.action.args.associated is not None:
+            nstars, bins, p = fwhm_axes.hist(self.action.args.associated['FWHM']*pixel_scale,
                                              bins=np.arange(minfwhm,maxfwhm,0.25),
                                              color='r', alpha=0.5)
             fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.5)
 
         ##-------------------------------------------------------------------------
         # Plot histogram of Sky Background
-    #     if objects is not None:
+    #     if self.action.args.objects is not None:
     #         sky_axes = plt.axes(plotpos[0][1])
-    #         avg_sky = np.median(objects['sky'].value)
+    #         avg_sky = np.median(self.action.args.objects['sky'].value)
     #         sky_axes.set_title(f"Sky Background = {avg_sky:.1f} e-/pix")
-    #         lowsky = np.percentile(objects['sky'].value, 1)
-    #         highsky = np.percentile(objects['sky'].value, 99)
-    #         nstars, bins, p = sky_axes.hist(objects['sky'].value,
+    #         lowsky = np.percentile(self.action.args.objects['sky'].value, 1)
+    #         highsky = np.percentile(self.action.args.objects['sky'].value, 99)
+    #         nstars, bins, p = sky_axes.hist(self.action.args.objects['sky'].value,
     #                                         bins=np.linspace(lowsky, highsky, 20),
     #                                         color='g', alpha=0.5)
     #         sky_axes.plot([avg_sky, avg_sky], [0,max(nstars)*1.2], 'r-', alpha=0.5)
@@ -200,80 +208,80 @@ class RenderJPEG(BasePrimitive):
 
         ##-------------------------------------------------------------------------
         # Plot FWHM vs. Flux
-        if objects is not None:
-            avg_fwhm = np.median(objects['FWHM'])*pixel_scale
+        if self.action.args.objects is not None:
+            avg_fwhm = np.median(self.action.args.objects['FWHM'])*pixel_scale
             fwhmmag_axes = plt.axes(plotpos[1][1])
-            fwhmmag_axes.plot(objects['FWHM']*pixel_scale, objects['flux2'], 'go',
+            fwhmmag_axes.plot(self.action.args.objects['FWHM']*pixel_scale, self.action.args.objects['flux2'], 'go',
                               mec='none', alpha=0.3)
-            fwhmmag_axes.plot([avg_fwhm, avg_fwhm], [1,max(objects['flux2'].value)*1.5],
+            fwhmmag_axes.plot([avg_fwhm, avg_fwhm], [1,max(self.action.args.objects['flux2'].value)*1.5],
                               'r-', alpha=0.5)
             fwhmmag_axes.set_xlabel("FWHM (arcsec)")
             fwhmmag_axes.set_xlim(minfwhm, maxfwhm)
             fwhmmag_axes.set_ylabel(f"Flux (e-/s)")
             fwhmmag_axes.set_yscale("log")
-        if associated is not None:
-            fwhmmag_axes.plot(associated['FWHM']*pixel_scale, associated['flux2'], 'ro',
+        if self.action.args.associated is not None:
+            fwhmmag_axes.plot(self.action.args.associated['FWHM']*pixel_scale, self.action.args.associated['flux2'], 'ro',
                               mec='none', alpha=0.3)
 
         ##-------------------------------------------------------------------------
         # Plot instrumental mags
-        if associated is not None:
+        if self.action.args.associated is not None:
             flux_axes = plt.axes(plotpos[2][1])
-#             flux_axes.plot(associated['catflux'], associated['flux'], 'go',
+#             flux_axes.plot(self.action.args.associated['catflux'], self.action.args.associated['flux'], 'go',
 #                           label='Source Extractor', mec=None, alpha=0.6)
-#             flux_axes.plot(associated['catflux'], associated['flux2'], 'bo',
+#             flux_axes.plot(self.action.args.associated['catflux'], self.action.args.associated['flux2'], 'bo',
 #                           label='photutils', mec=None, alpha=0.6)
 #             flux_axes.set_xscale('log')
 #             flux_axes.invert_xaxis()
 
-            flux_axes.plot(associated['mag'], associated['flux'], 'go',
+            flux_axes.plot(self.action.args.associated['mag'], self.action.args.associated['flux'], 'go',
                           label='Source Extractor', mec=None, alpha=0.6)
-            flux_axes.plot(associated['mag'], associated['flux2'], 'bo',
+            flux_axes.plot(self.action.args.associated['mag'], self.action.args.associated['flux2'], 'bo',
                           label='photutils', mec=None, alpha=0.6)
-            flux_axes.set_xlim(min(associated['mag']), max(associated['mag']))
+            flux_axes.set_xlim(min(self.action.args.associated['mag']), max(self.action.args.associated['mag']))
 
             flux_axes.set_yscale('log')
             flux_axes.invert_yaxis()
             flux_axes.set_ylabel('Measured Flux (e-/s)')
             plt.grid()
-            if zero_point_fit is not None:
-                label = f'throughput={zero_point_fit.slope.value:.3g} e-/photon'
-                flux_axes.plot(associated['mag'],
-                              zero_point_fit(associated['catflux']), 'r-',
+            if self.action.args.zero_point_fit is not None:
+                label = f'throughput={self.action.args.zero_point_fit.slope.value:.3g} e-/photon'
+                flux_axes.plot(self.action.args.associated['mag'],
+                              self.action.args.zero_point_fit(self.action.args.associated['catflux']), 'r-',
                               label=label)
-#                 flux_axes.plot(associated['catflux'],
-#                               zero_point_fit(associated['catflux']), 'r-',
+#                 flux_axes.plot(self.action.args.associated['catflux'],
+#                               self.action.args.zero_point_fit(self.action.args.associated['catflux']), 'r-',
 #                               label=label)
             plt.legend(loc='best')
 
         ##-------------------------------------------------------------------------
         # Plot instrumental mag diffs
-        if associated is not None and zero_point_fit is not None:
+        if self.action.args.associated is not None and self.action.args.zero_point_fit is not None:
             diff_axes = plt.axes(plotpos[3][1])
-            ratio = associated['flux2'] / zero_point_fit(associated['catflux'])
+            ratio = self.action.args.associated['flux2'] / self.action.args.zero_point_fit(self.action.args.associated['catflux'])
             deltamag = -2.512*np.log10(ratio)
             mean, med, std = stats.sigma_clipped_stats(deltamag)
             p1, p99 = np.percentile(deltamag, 1), np.percentile(deltamag, 99)
-#             diff_axes.plot(associated['catflux'], deltamag, 'bo',
+#             diff_axes.plot(self.action.args.associated['catflux'], deltamag, 'bo',
 #                            label='Delta Mag (StdDev={std:.2f}, p1={p1:.2f}, p99={p99:.2f})',
 #                            mec=None, alpha=0.6)
-#             diff_axes.plot([min(associated['catflux']), max(associated['catflux'])], [0,0], 'k-',
+#             diff_axes.plot([min(self.action.args.associated['catflux']), max(self.action.args.associated['catflux'])], [0,0], 'k-',
 #                            mec=None, alpha=0.6)
 #             diff_axes.set_xlabel('Estimated Catalog Flux (photons/s)')
 #             diff_axes.set_xscale('log')
 #             diff_axes.invert_xaxis()
 
-            diff_axes.plot(associated['mag'], deltamag, 'bo',
+            diff_axes.plot(self.action.args.associated['mag'], deltamag, 'bo',
                            label=f'Delta Mag (StdDev={std:.2f}, p1={p1:.2f}, p99={p99:.2f})',
                            mec=None, alpha=0.6)
-            diff_axes.plot([min(associated['mag']), max(associated['mag'])], [0,0], 'k-',
+            diff_axes.plot([min(self.action.args.associated['mag']), max(self.action.args.associated['mag'])], [0,0], 'k-',
                            mec=None, alpha=0.6)
-            diff_axes.plot([min(associated['mag']), max(associated['mag'])], [0.1,0.1], 'r-',
+            diff_axes.plot([min(self.action.args.associated['mag']), max(self.action.args.associated['mag'])], [0.1,0.1], 'r-',
                            mec=None, alpha=0.6)
-            diff_axes.plot([min(associated['mag']), max(associated['mag'])], [-0.1,-0.1], 'r-',
+            diff_axes.plot([min(self.action.args.associated['mag']), max(self.action.args.associated['mag'])], [-0.1,-0.1], 'r-',
                            mec=None, alpha=0.6)
             diff_axes.set_xlabel('Catalog Magnitude')
-            diff_axes.set_xlim(min(associated['mag']), max(associated['mag']))
+            diff_axes.set_xlim(min(self.action.args.associated['mag']), max(self.action.args.associated['mag']))
 
             diff_axes.set_ylim(p1,p99)
             diff_axes.set_ylabel('-2.512*log10(Measured/Fitted)')
@@ -282,7 +290,7 @@ class RenderJPEG(BasePrimitive):
 
 
         jpeg_axes.set_title(titlestr)
-        reportfilename = f'{fitsfile.split(".")[0]}.jpg'
+        reportfilename = f'{self.action.args.fitsfile.split(".")[0]}.jpg'
         self.action.args.jpegfile = Path('/var/www/plots/V20/') / reportfilename
         plt.savefig(self.action.args.jpegfile, dpi=dpi)
 

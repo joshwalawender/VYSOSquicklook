@@ -295,8 +295,6 @@ class ExtractStars(BasePrimitive):
         except Exception as e:
             self.log.error('Source extractor failed')
             self.log.error(e)
-            self.action.args.fwhm = np.nan
-            self.action.args.ellipticity = np.nan
             return self.action.args
 
         t = Table(objects)
@@ -325,8 +323,6 @@ class ExtractStars(BasePrimitive):
 
         if self.action.args.n_objects == 0:
             self.log.warning('No stars found')
-            self.action.args.fwhm = np.nan
-            self.action.args.ellipticity = np.nan
         else:
             FWHM_pix = np.median(t['FWHM'][~filtered])
             ellipticity = np.median(t['ellipticity'][~filtered])

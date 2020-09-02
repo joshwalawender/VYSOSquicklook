@@ -51,6 +51,20 @@ class ReadFITS(BasePrimitive):
         self.action.args.kd = None
         self.action.args.skip = False
         self.action.args.fitsfilepath = Path(self.action.args.name).expanduser().absolute()
+        # initialize values in the args for use with science frames
+        self.action.args.background = None
+        self.action.args.objects = None
+        self.action.args.header_pointing = None
+        self.action.args.wcs_pointing = None
+        self.action.args.perr = np.nan
+        self.action.args.wcs = None
+        self.action.args.catalog = None
+        self.action.args.fwhm = None
+        self.action.args.ellipticity = None
+        self.action.args.zero_point = None
+        self.action.args.associated = None
+        self.action.args.zero_point_fit = None
+        self.action.args.f0 = None
 
         # If we are reading a compressed file, use the uncompressed version of
         # the name for the database
@@ -125,19 +139,6 @@ class PrepareScience(BasePrimitive):
         BasePrimitive.__init__(self, action, context)
         self.log = context.pipeline_logger
         self.cfg = self.context.config.instrument
-        # initialize values in the args for use with science frames
-        self.action.args.background = None
-        self.action.args.objects = None
-        self.action.args.wcs_pointing = None
-        self.action.args.perr = np.nan
-        self.action.args.wcs = None
-        self.action.args.catalog = None
-        self.action.args.fwhm = np.nan
-        self.action.args.ellipticity = np.nan
-        self.action.args.zero_point = np.nan
-        self.action.args.associated = None
-        self.action.args.zero_point_fit = None
-        self.action.args.f0 = None
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""

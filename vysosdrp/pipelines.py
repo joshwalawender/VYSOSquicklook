@@ -55,8 +55,8 @@ class QuickLookPipeline(BasePipeline):
 #         "copy_flat_locally": ("CopyDataLocally", "copying_data", "flat_gain_correct"),
         "flat_gain_correct": ("GainCorrect", "correcting_gain", "flat_create_deviation"),
         "flat_create_deviation": ("CreateDeviation", "estimating_uncertainty", "flat_stats"),
-        "flat_stats": ("ImageStats", "flat_stats", "render_jpeg"),
-        "render_jpeg": ("RenderJPEG", "rendering_jpeg", "save_flat_to_list"),
+        "flat_stats": ("ImageStats", "flat_stats", "flat_render_jpeg"),
+        "flat_render_jpeg": ("RenderJPEG", "rendering_jpeg", "save_flat_to_list"),
         "save_flat_to_list": ("SaveToList", "saving_result", "record_flat"),
         "record_flat": ("Record", "recording_results_in_mongo", None),
 
