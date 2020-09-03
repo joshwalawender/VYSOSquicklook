@@ -152,6 +152,12 @@ class UpdateDirectory(BasePrimitive):
         self.context.data_set.remove_all()
         self.context.data_set.change_directory(f"{newdir}")
 
+        if self.action.args.flats is not True and self.action.args.cals is not True:
+            self.log.info(f'  Changing UT date, so clearing lists of flats and cals')
+            self.context.biases = list()
+            self.context.darks = list()
+            self.context.flats = dict()
+
         files = [f.name for f in newdir.glob('*.fts')]
         self.log.info(f"  Ingesting {len(files)} files")
         self.log.debug(files)
