@@ -25,7 +25,10 @@ def _parseArguments(in_args):
            help="Configuration file")
     parser.add_argument("--cals", dest="cals",
            default=False, action="store_true",
-           help="Run the cals pipeline?")
+           help="Change to watching the cals directory.")
+    parser.add_argument("--flats", dest="flats",
+           default=False, action="store_true",
+           help="Change to watching the flats directory.")
     parser.add_argument("-O", "--overwrite", dest="overwrite",
            default=False, action="store_true",
            help="Reprocess files if they already exist in database?  Only works for analyzeone.")
@@ -150,6 +153,11 @@ def change_directory():
     else:
         date_string = datetime.utcnow().strftime('%Y%m%dUT')
         newdir = Path(f'~/V20Data/Images/{date_string}').expanduser()
+        if args.cals is True:
+            newdir = Path(f'~/V20Data/Images/{date_string}/Calibration').expanduser()
+        if args.flats is True:
+            newdir = Path(f'~/V20Data/Images/{date_string}/AutoFlat').expanduser()
+
     args.input = str(newdir)
     if newdir.exists() is False:
         newdir.mkdir(parents=True)
