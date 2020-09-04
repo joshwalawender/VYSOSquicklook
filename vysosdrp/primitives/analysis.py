@@ -96,6 +96,47 @@ def sigma_clipping_line_fit(xdata, ydata, nsigma=5, maxiter=3, maxcleanfrac=0.2,
 
 
 ##-----------------------------------------------------------------------------
+## Function: estimate_f0
+##-----------------------------------------------------------------------------
+def estimate_f0(A, band='i'):
+    '''
+    1 Jy = 1.51e7 photons sec^-1 m^-2 (dlambda/lambda)^-1
+    https://archive.is/20121204144725/http://www.astro.utoronto.ca/~patton/astro/mags.html#selection-587.2-587.19
+    band cent    dl/l    Flux0   Reference
+    U    0.36    0.15    1810    Bessel (1979)
+    B    0.44    0.22    4260    Bessel (1979)
+    V    0.55    0.16    3640    Bessel (1979)
+    R    0.64    0.23    3080    Bessel (1979)
+    I    0.79    0.19    2550    Bessel (1979)
+    J    1.26    0.16    1600    Campins, Reike, & Lebovsky (1985)
+    H    1.60    0.23    1080    Campins, Reike, & Lebovsky (1985)
+    K    2.22    0.23    670     Campins, Reike, & Lebovsky (1985)
+    g    0.52    0.14    3730    Schneider, Gunn, & Hoessel (1983)
+    r    0.67    0.14    4490    Schneider, Gunn, & Hoessel (1983)
+    i    0.79    0.16    4760    Schneider, Gunn, & Hoessel (1983)
+    z    0.91    0.13    4810    Schneider, Gunn, & Hoessel (1983)
+    '''
+    tabledata = [('U', 0.36, 0.15, 1810, 'Bessel (1979)'),
+                 ('B', 0.44, 0.22, 4260, 'Bessel (1979)'),
+                 ('V', 0.55, 0.16, 3640, 'Bessel (1979)'),
+                 ('R', 0.64, 0.23, 3080, 'Bessel (1979)'),
+                 ('I', 0.79, 0.19, 2550, 'Bessel (1979)'),
+                 ('J', 1.26, 0.16, 1600, 'Campins, Reike, & Lebovsky (1985)'),
+                 ('H', 1.60, 0.23, 1080, 'Campins, Reike, & Lebovsky (1985)'),
+                 ('K', 2.22, 0.23, 670 , 'Campins, Reike, & Lebovsky (1985)'),
+                 ('g', 0.52, 0.14, 3730, 'Schneider, Gunn, & Hoessel (1983)'),
+                 ('r', 0.67, 0.14, 4490, 'Schneider, Gunn, & Hoessel (1983)'),
+                 ('i', 0.79, 0.16, 4760, 'Schneider, Gunn, & Hoessel (1983)'),
+                 ('z', 0.91, 0.13, 4810, 'Schneider, Gunn, & Hoessel (1983)'),
+                ]
+    t = Table(tabledata, names=('band', 'cent', 'dl/l', 'Flux0', 'Reference'))
+    band = t[t['band'] == band]
+    dl = 0.16 # dl/l (for i band)
+    f0 = band['Flux0'] * 1.51e7 * A * band['dl/l'] # photons / sec
+    return f0
+
+
+##-----------------------------------------------------------------------------
 ## Primitive: MoonInfo
 ##-----------------------------------------------------------------------------
 class MoonInfo(BasePrimitive):
@@ -385,7 +426,7 @@ class SolveAstrometry(BasePrimitive):
                   pre_condition(self, 'WCS not already solved',
                                 self.action.args.wcs is None),
                  ]
-        force_solve = self.cfg['astrometry'].getboolean('force_solve', False)
+        force_solve = self.cfg['Astrometry'].getboolean('force_solve', False)
         return np.all(checks) if force_solve is False else True
 
     def _post_condition(self):
@@ -401,11 +442,11 @@ class SolveAstrometry(BasePrimitive):
 
         nx, ny = self.action.args.kd.pixeldata[0].shape
         estimated_pixel_scale = self.cfg['Telescope'].getfloat('pixel_scale', 1)
-        search_radius = self.cfg['astrometry'].getfloat('search_radius', 1)
-        solve_field = self.cfg['astrometry'].get('solve_field', '/usr/local/bin/solve-field')
+        search_radius = self.cfg['Astrometry'].getfloat('search_radius', 1)
+        solve_field = self.cfg['Astrometry'].get('solve_field', '/usr/local/bin/solve-field')
         wcs_output_file = Path('~/tmp.wcs').expanduser()
         axy_output_file = Path('~/tmp.axy').expanduser()
-        solvetimeout = self.cfg['astrometry'].getint('solve_timeout', 120)
+        solvetimeout = self.cfg['Astrometry'].getint('solve_timeout', 120)
         cmd = [f'{solve_field}', '-p', '-O', '-N', 'none', '-B', 'none',
                '-U', 'none', '-S', 'none', '-M', 'none', '-R', 'none',
                '--axy', f'{axy_output_file}', '-W', f'{wcs_output_file}',
@@ -413,20 +454,26 @@ class SolveAstrometry(BasePrimitive):
                '-L', f'{0.9*estimated_pixel_scale}',
                '-H', f'{1.1*estimated_pixel_scale}',
                '-u', 'arcsecperpix',
-               '-t', f"{self.cfg['astrometry'].getfloat('tweak_order', 2)}",
+               '-t', f"{self.cfg['Astrometry'].getfloat('tweak_order', 2)}",
                '-3', f'{self.action.args.header_pointing.ra.deg}',
                '-4', f'{self.action.args.header_pointing.dec.deg}',
                '-5', f'{search_radius}',
                '-l', f'{solvetimeout}',
                ]
-        if self.cfg['astrometry'].get('astrometry_cfg_file', None) is not None:
-            cmd.extend(['-b', self.cfg['astrometry'].get('astrometry_cfg_file')])
+        if self.cfg['Astrometry'].get('astrometry_cfg_file', None) is not None:
+            cmd.extend(['-b', self.cfg['Astrometry'].get('astrometry_cfg_file')])
         cmd.append(f'{self.action.args.fitsfilepath}')
 
         self.log.debug(f"  Solve astrometry command: {' '.join(cmd)}")
 
-        result = subprocess.run(cmd, timeout=solvetimeout,
-                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            result = subprocess.run(cmd, timeout=solvetimeout,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE)
+        except subprocess.TimeoutExpired as e:
+            self.log.warning('The solve-field process timed out')
+            return self.action.args
+
         self.log.debug(f"  Returncode = {result.returncode}")
         for line in result.stdout.decode().split('\n'):
             self.log.debug(line)
@@ -472,7 +519,7 @@ class SolveAstrometry(BasePrimitive):
 
 
 ##-----------------------------------------------------------------------------
-## Primitive: SolveAstrometry
+## Primitive: SolveAstrometryOnline
 ##-----------------------------------------------------------------------------
 class SolveAstrometryOnline(BasePrimitive):
     """
@@ -498,7 +545,7 @@ class SolveAstrometryOnline(BasePrimitive):
                   pre_condition(self, 'WCS not already solved',
                                 self.action.args.wcs is None),
                  ]
-        force_solve = self.cfg['astrometry'].getboolean('force_solve', False)
+        force_solve = self.cfg['Astrometry'].getboolean('force_solve', False)
         return np.all(checks) if force_solve is False else True
 
     def _post_condition(self):
@@ -515,8 +562,8 @@ class SolveAstrometryOnline(BasePrimitive):
         from astroquery.astrometry_net import AstrometryNet
 
         ast = AstrometryNet()
-        ast.api_key = self.cfg['astrometry'].get('api_key', None)
-        solve_timeout = self.cfg['astrometry'].getint('solve_timeout', 90)
+        ast.api_key = self.cfg['Astrometry'].get('api_key', None)
+        solve_timeout = self.cfg['Astrometry'].getint('solve_timeout', 90)
         nx, ny = self.action.args.kd.pixeldata[0].data.shape
 
         if self.action.args.n_objects >= 100:
@@ -568,9 +615,9 @@ class SolveAstrometryOnline(BasePrimitive):
 
 
 ##-----------------------------------------------------------------------------
-## Primitive: GetCatalogStars
+## Primitive: GetCalibrationStars
 ##-----------------------------------------------------------------------------
-class GetCatalogStars(BasePrimitive):
+class GetCalibrationStars(BasePrimitive):
     """
     This is a template for primitives, which is usually an action.
 
@@ -611,8 +658,8 @@ class GetCatalogStars(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
 
-        catalogname = self.cfg['jpeg'].get('catalog')
-        maglimit = self.cfg['jpeg'].get('catalog_maglimit')
+        catalogname = self.cfg['Photometry'].get('calibration_catalog')
+        maglimit = self.cfg['Photometry'].get('calibration_maglimit')
 
         fp = self.action.args.wcs.calc_footprint(axes=self.action.args.kd.pixeldata[0].data.shape)
         dra = fp[:,0].max() - fp[:,0].min()
@@ -635,9 +682,9 @@ class GetCatalogStars(BasePrimitive):
 
 
 ##-----------------------------------------------------------------------------
-## Primitive: AssociateCatalogStars
+## Primitive: AssociateCalibratorStars
 ##-----------------------------------------------------------------------------
-class AssociateCatalogStars(BasePrimitive):
+class AssociateCalibratorStars(BasePrimitive):
     """
     This is a template for primitives, which is usually an action.
 
@@ -677,7 +724,7 @@ class AssociateCatalogStars(BasePrimitive):
         self.log.info(f"Running {self.__class__.__name__} action")
 
         pixel_scale = self.cfg['Telescope'].getfloat('pixel_scale', 1) * u.arcsec/u.pix
-        assoc_radius = self.cfg['Extract'].getfloat('accoc_radius', 1)\
+        assoc_radius = self.cfg['Photometry'].getfloat('accoc_radius', 1)\
                        * self.action.args.fwhm*u.pix\
                        * pixel_scale
         associated = Table(names=('RA', 'DEC', 'x', 'y', 'assoc_distance', 'mag', 'catflux', 'flux', 'flux2', 'instmag', 'FWHM'),
@@ -685,16 +732,11 @@ class AssociateCatalogStars(BasePrimitive):
 
         catalog_coords = c.SkyCoord(self.action.args.catalog['RA'], self.action.args.catalog['DEC'])
 
-        band = 4760 # Jy (for i band)
-        dl = 0.16 # dl/l (for i band)
         d_telescope = self.cfg['Telescope'].getfloat('d_primary_mm', 508)
         d_obstruction = self.cfg['Telescope'].getfloat('d_obstruction_mm', 127)
         A = 3.14*(d_telescope/2/1000)**2 - 3.14*(d_obstruction/2/1000)**2 # m^2
-        # 1 Jy = 1.51e7 photons sec^-1 m^-2 (dlambda/lambda)^-1
-        # https://archive.is/20121204144725/http://www.astro.utoronto.ca/~patton/astro/mags.html#selection-587.2-587.19
-        self.action.args.f0 = band * 1.51e7 * A * dl # photons / sec
+        self.action.args.f0 = estimate_f0(A, band='i') # photons / sec
 
-#         self.log.info(self.action.args.objects.keys())
         for detected in self.action.args.objects:
             ra_deg, dec_deg = self.action.args.wcs.all_pix2world(detected['x'], detected['y'], 1)
             detected_coord = c.SkyCoord(ra_deg, dec_deg, frame='fk5', unit=(u.deg, u.deg))
@@ -712,7 +754,7 @@ class AssociateCatalogStars(BasePrimitive):
                                      'flux2': detected['flux2'],
                                      'FWHM': detected['FWHM'],
                                      } )
-        if len(associated) == 0:
+        if len(associated) < 2:
             self.action.args.associated = None
             return self.action.args
 
@@ -728,6 +770,172 @@ class AssociateCatalogStars(BasePrimitive):
         deltas = associated['flux2'] - fitted_line(associated['catflux'])
         mean, med, std = stats.sigma_clipped_stats(deltas)
         self.log.info(f"  Fit StdDev = {std:.2g}")
+
+        return self.action.args
+
+
+##-----------------------------------------------------------------------------
+## Primitive: GetTargetStars
+##-----------------------------------------------------------------------------
+class GetTargetStars(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        BasePrimitive.__init__(self, action, context)
+        self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        catalog = self.cfg['Photometry'].get('target_catalog', None)
+        known_catalogs = ['Gaia', 'UCAC4']
+        checks = [pre_condition(self, 'Skip image is not set',
+                                not self.action.args.skip),
+                  pre_condition(self, 'Found existing WCS',
+                                self.action.args.wcs is not None),
+                  pre_condition(self, f'Catalog {catalog} is known',
+                                catalog in known_catalogs),
+                 ]
+        return np.all(checks)
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        checks = []
+        return np.all(checks)
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+
+        catalogname = self.cfg['Photometry'].get('target_catalog')
+        maglimit = self.cfg['Photometry'].get('target_maglimit')
+
+        fp = self.action.args.wcs.calc_footprint(axes=self.action.args.kd.pixeldata[0].data.shape)
+        dra = fp[:,0].max() - fp[:,0].min()
+        ddec = fp[:,1].max() - fp[:,1].min()
+        radius = np.sqrt((dra*np.cos(fp[:,1].mean()*np.pi/180.))**2 + ddec**2)/2.
+
+        if self.action.args.wcs_pointing is not None:
+            self.log.debug('  Using WCS pointing for catalog query')
+            pointing = self.action.args.wcs_pointing
+        else:
+            self.log.warning('Using header pointing for catalog query')
+            pointing = self.action.args.header_pointing
+
+        self.log.info(f"Retrieving {catalogname} entries (magnitude < {maglimit})")
+        self.action.args.target_catalog = get_catalog(pointing, radius, catalog=catalogname, maglimit=maglimit)
+        ncat = len(self.action.args.target_catalog) if self.action.args.target_catalog is not None else 0
+        self.log.info(f"  Found {ncat} target catalog entries")
+
+        return self.action.args
+
+
+##-----------------------------------------------------------------------------
+## Primitive: AssociateTargetStars
+##-----------------------------------------------------------------------------
+class AssociateTargetStars(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        BasePrimitive.__init__(self, action, context)
+        self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        checks = [pre_condition(self, 'Skip image is not set',
+                                not self.action.args.skip),
+                  pre_condition(self, 'Have extracted objects',
+                                self.action.args.objects is not None),
+                  pre_condition(self, 'Have target catalog objects',
+                                self.action.args.target_catalog is not None),
+                 ]
+        return np.all(checks)
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        checks = []
+        return np.all(checks)
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+
+        pixel_scale = self.cfg['Telescope'].getfloat('pixel_scale', 1) * u.arcsec/u.pix
+        assoc_radius = self.cfg['Photometry'].getfloat('accoc_radius', 1)\
+                       * self.action.args.fwhm*u.pix\
+                       * pixel_scale
+        associated = Table(names=('RA', 'DEC', 'x', 'y', 'assoc_distance', 'mag', 'catflux', 'flux', 'flux2', 'instmag', 'FWHM'),
+                           dtype=('f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8') )
+
+        catalog_coords = c.SkyCoord(self.action.args.target_catalog['RA'],
+                                    self.action.args.target_catalog['DEC'])
+
+        band = 4760 # Jy (for i band)
+        dl = 0.16 # dl/l (for i band)
+        d_telescope = self.cfg['Telescope'].getfloat('d_primary_mm', 508)
+        d_obstruction = self.cfg['Telescope'].getfloat('d_obstruction_mm', 127)
+        A = 3.14*(d_telescope/2/1000)**2 - 3.14*(d_obstruction/2/1000)**2 # m^2
+        # 1 Jy = 1.51e7 photons sec^-1 m^-2 (dlambda/lambda)^-1
+        # https://archive.is/20121204144725/http://www.astro.utoronto.ca/~patton/astro/mags.html#selection-587.2-587.19
+        self.action.args.f0 = band * 1.51e7 * A * dl # photons / sec
+
+        for detected in self.action.args.objects:
+            ra_deg, dec_deg = self.action.args.wcs.all_pix2world(detected['x'], detected['y'], 1)
+            detected_coord = c.SkyCoord(ra_deg, dec_deg, frame='fk5', unit=(u.deg, u.deg))
+            idx, d2d, d3d = detected_coord.match_to_catalog_sky(catalog_coords)
+            if d2d[0].to(u.arcsec) < assoc_radius.to(u.arcsec):
+                associated.add_row( {'RA': self.action.args.target_catalog[idx]['RA'],
+                                     'DEC': self.action.args.target_catalog[idx]['DEC'],
+                                     'x': detected['x'],
+                                     'y': detected['y'],
+                                     'assoc_distance': d2d[0].to(u.arcsec).value, 
+                                     'mag': self.action.args.target_catalog[idx]['mag'],
+                                     'catflux': self.action.args.f0 * 10**(-self.action.args.target_catalog[idx]['mag']/2.512), # phot/sec
+                                     'flux': detected['flux'],
+                                     'instmag': -2.512*np.log(detected['flux']),
+                                     'flux2': detected['flux2'],
+                                     'FWHM': detected['FWHM'],
+                                     } )
+        if len(associated) < 2:
+            self.action.args.associated = None
+            return self.action.args
+
+        self.log.info(f'  Measured {len(associated)} target catalog stars')
+        self.action.args.measured = associated
+        self.action.args.measured.sort('flux')
+
+#         nclip = int(np.floor(0.05*len(associated['catflux'])))
+#         fitted_line = sigma_clipping_line_fit(associated['catflux'][nclip:-nclip],
+#                                               associated['flux2'][nclip:-nclip],
+#                                               intercept_fixed=True)
+#         self.log.info(f"  Slope (e-/photon) = {fitted_line.slope.value:.3g}")
+#         self.action.args.zero_point_fit = fitted_line
+#         deltas = associated['flux2'] - fitted_line(associated['catflux'])
+#         mean, med, std = stats.sigma_clipped_stats(deltas)
+#         self.log.info(f"  Fit StdDev = {std:.2g}")
 
         return self.action.args
 

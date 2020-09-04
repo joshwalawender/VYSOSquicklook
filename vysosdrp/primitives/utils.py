@@ -88,7 +88,7 @@ def find_master(master_directory, master_type, kd):
 ## Evaluate pre and post conditions
 ##-----------------------------------------------------------------------------
 def pre_condition(primitive, name, condition,
-                  fail_level=logging.WARNING,
+                  fail_level=logging.DEBUG,
                   success_level=logging.DEBUG):
     if condition is True:
         primitive.log.log(success_level,

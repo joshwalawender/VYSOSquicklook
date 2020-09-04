@@ -59,10 +59,12 @@ class ReadFITS(BasePrimitive):
         self.action.args.perr = np.nan
         self.action.args.wcs = None
         self.action.args.catalog = None
+        self.action.args.target_catalog = None
         self.action.args.fwhm = None
         self.action.args.ellipticity = None
         self.action.args.zero_point = None
         self.action.args.associated = None
+        self.action.args.measured = None
         self.action.args.zero_point_fit = None
         self.action.args.f0 = None
 
