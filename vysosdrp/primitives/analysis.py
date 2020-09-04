@@ -4,6 +4,7 @@ import sys
 import re
 import subprocess
 from matplotlib import pyplot as plt
+import subprocess
 
 import numpy as np
 from astropy.io import fits
@@ -336,8 +337,8 @@ class ExtractStars(BasePrimitive):
         ap_radius = int(2.0*FWHM_pix)
         star_apertures = photutils.CircularAperture(positions, ap_radius)
         sky_apertures = photutils.CircularAnnulus(positions,
-                                                  r_in=ap_radius+2,
-                                                  r_out=ap_radius+6)
+                                                  r_in=int(np.ceil(1.5*ap_radius)),
+                                                  r_out=int(np.ceil(2.0*ap_radius)))
         phot_table = photutils.aperture_photometry(
                                self.action.args.kd.pixeldata[0],
                                [star_apertures, sky_apertures])
@@ -384,7 +385,120 @@ class SolveAstrometry(BasePrimitive):
                   pre_condition(self, 'WCS not already solved',
                                 self.action.args.wcs is None),
                  ]
-        force_solve = self.cfg['Telescope'].getboolean('force_solve', False)
+        force_solve = self.cfg['astrometry'].getboolean('force_solve', False)
+        return np.all(checks) if force_solve is False else True
+
+    def _post_condition(self):
+        """Check for conditions necessary to verify that the process run correctly"""
+        checks = []
+        return np.all(checks)
+
+    def _perform(self):
+        """
+        Returns an Argument() with the parameters that depends on this operation.
+        """
+        self.log.info(f"Running {self.__class__.__name__} action")
+
+        nx, ny = self.action.args.kd.pixeldata[0].shape
+        estimated_pixel_scale = self.cfg['Telescope'].getfloat('pixel_scale', 1)
+        search_radius = self.cfg['astrometry'].getfloat('search_radius', 1)
+        solve_field = self.cfg['astrometry'].get('solve_field', '/usr/local/bin/solve-field')
+        wcs_output_file = Path('~/tmp.wcs').expanduser()
+        axy_output_file = Path('~/tmp.axy').expanduser()
+        solvetimeout = self.cfg['astrometry'].getint('solve_timeout', 120)
+        cmd = [f'{solve_field}', '-p', '-O', '-N', 'none', '-B', 'none',
+               '-U', 'none', '-S', 'none', '-M', 'none', '-R', 'none',
+               '--axy', f'{axy_output_file}', '-W', f'{wcs_output_file}',
+               '-z', '2',
+               '-L', f'{0.9*estimated_pixel_scale}',
+               '-H', f'{1.1*estimated_pixel_scale}',
+               '-u', 'arcsecperpix',
+               '-t', f"{self.cfg['astrometry'].getfloat('tweak_order', 2)}",
+               '-3', f'{self.action.args.header_pointing.ra.deg}',
+               '-4', f'{self.action.args.header_pointing.dec.deg}',
+               '-5', f'{search_radius}',
+               '-l', f'{solvetimeout}',
+               ]
+        if self.cfg['astrometry'].get('astrometry_cfg_file', None) is not None:
+            cmd.extend(['-b', self.cfg['astrometry'].get('astrometry_cfg_file')])
+        cmd.append(f'{self.action.args.fitsfilepath}')
+
+        self.log.debug(f"  Solve astrometry command: {' '.join(cmd)}")
+
+        result = subprocess.run(cmd, timeout=solvetimeout,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.log.debug(f"  Returncode = {result.returncode}")
+        for line in result.stdout.decode().split('\n'):
+            self.log.debug(line)
+        if result.returncode != 0:
+            self.log.warning(f'Astrometry solve failed:')
+            for line in result.stdout.decode().split('\n'):
+                self.log.warning(line)
+            for line in result.stderr.decode().split('\n'):
+                self.log.warning(line)
+            return self.action.args
+
+        if wcs_output_file.exists() is True:
+            self.log.debug(f"  Found {wcs_output_file}")
+        else:
+            raise FileNotFoundError(f"Could not find {wcs_output_file}")
+        if axy_output_file.exists() is True:
+            self.log.debug(f"  Found {axy_output_file}. Deleteing.")
+            axy_output_file.unlink()
+        # Open wcs output
+        self.log.debug(f"  Creating astropy.wcs.WCS object")
+        output_wcs = WCS(f'{wcs_output_file}')
+        self.log.debug(f"Deleteing {wcs_output_file}.")
+        wcs_output_file.unlink()
+        if output_wcs.is_celestial is False:
+            self.log.info(f"  Could not parse resulting WCS as celestial")
+            return self.action.args
+
+        self.log.info(f"  Solve complete")
+        self.action.args.wcs_header = output_wcs.to_header_string()
+        self.action.args.wcs = output_wcs
+
+        # Determine Pointing Error
+        r, d = self.action.args.wcs.all_pix2world([nx/2.], [ny/2.], 1)
+        self.action.args.wcs_pointing = c.SkyCoord(r[0], d[0], frame='fk5',
+                                          equinox='J2000',
+                                          unit=(u.deg, u.deg),
+                                          obstime=self.action.args.kd.obstime())
+        self.action.args.perr = self.action.args.wcs_pointing.separation(
+                                     self.action.args.header_pointing)
+        self.log.info(f'Pointing error = {self.action.args.perr.to(u.arcmin):.1f}')
+
+        return self.action.args
+
+
+##-----------------------------------------------------------------------------
+## Primitive: SolveAstrometry
+##-----------------------------------------------------------------------------
+class SolveAstrometryOnline(BasePrimitive):
+    """
+    This is a template for primitives, which is usually an action.
+
+    The methods in the base class can be overloaded:
+    - _pre_condition
+    - _post_condition
+    - _perform
+    - apply
+    - __call__
+    """
+
+    def __init__(self, action, context):
+        BasePrimitive.__init__(self, action, context)
+        self.log = context.pipeline_logger
+        self.cfg = self.context.config.instrument
+
+    def _pre_condition(self):
+        """Check for conditions necessary to run this process"""
+        checks = [pre_condition(self, 'Skip image is not set',
+                                not self.action.args.skip),
+                  pre_condition(self, 'WCS not already solved',
+                                self.action.args.wcs is None),
+                 ]
+        force_solve = self.cfg['astrometry'].getboolean('force_solve', False)
         return np.all(checks) if force_solve is False else True
 
     def _post_condition(self):
@@ -506,7 +620,7 @@ class GetCatalogStars(BasePrimitive):
         radius = np.sqrt((dra*np.cos(fp[:,1].mean()*np.pi/180.))**2 + ddec**2)/2.
 
         if self.action.args.wcs_pointing is not None:
-            self.log.debug('Using WCS pointing for catalog query')
+            self.log.debug('  Using WCS pointing for catalog query')
             pointing = self.action.args.wcs_pointing
         else:
             self.log.warning('Using header pointing for catalog query')

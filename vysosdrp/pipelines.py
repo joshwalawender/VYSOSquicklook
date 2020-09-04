@@ -28,7 +28,9 @@ class QuickLookPipeline(BasePipeline):
         # Science data quick look
         "prepare_science_file": ("PrepareScience", "preparing_science", "moon_info"),
 #         "copy_data_locally": ("CopyDataLocally", "copying_data", "moon_info"),
-        "moon_info": ("MoonInfo", "determining_moon_info", "gain_correct"),
+        "moon_info": ("MoonInfo", "determining_moon_info", "subtract_bias"),
+        "subtract_bias": ("BiasSubtract", "subtracting_bias", "subtract_dark"),
+        "subtract_dark": ("DarkSubtract", "subtracting_dark", "gain_correct"),
         "gain_correct": ("GainCorrect", "correcting_gain", "create_deviation"),
         "create_deviation": ("CreateDeviation", "estimating_uncertainty", "make_source_mask"),
         "make_source_mask": ("MakeSourceMask", "making_source_mask", "create_background"),
@@ -42,13 +44,17 @@ class QuickLookPipeline(BasePipeline):
 
         # Bias processing
 #         "copy_bias_locally": ("CopyDataLocally", "copying_data", "save_bias_to_list"),
-        "save_bias_to_list": ("SaveToList", "saving_result", "record_bias"),
+        "save_bias_to_list": ("SaveToList", "saving_result", "bias_stats"),
+        "bias_stats": ("ImageStats", "bias_stats", "record_bias"),
         "record_bias": ("Record", "recording_results_in_mongo", "stack_bias_frames"),
         "stack_bias_frames": ("StackBiases", "stacking_biases", None),
 
         # Dark processing
 #         "copy_dark_locally": ("CopyDataLocally", "copying_data", "save_dark_to_list"),
-        "save_dark_to_list": ("SaveToList", "saving_result", "record_dark"),
+        "save_dark_to_list": ("SaveToList", "saving_result", "bias_correct_dark_frames"),
+        "bias_correct_dark_frames": ("BiasSubtract", "bias_correcting_darks", "dark_stats"),
+        "dark_stats": ("ImageStats", "dark_stats", "stack_dark_frames"),
+        "stack_dark_frames": ("StackDarks", "saving_result", "record_dark"),
         "record_dark": ("Record", "recording_results_in_mongo", None),
 
         # Flat processing
@@ -68,7 +74,7 @@ class QuickLookPipeline(BasePipeline):
         """
         BasePipeline.__init__(self, context)
         context.biases = list()
-        context.darks = list()
+        context.darks = dict()
         context.flats = dict()
 
     def sort_file(self, action, context):

@@ -30,6 +30,61 @@ from keckdrpframework.models.arguments import Arguments
 
 
 ##-----------------------------------------------------------------------------
+## find_master
+##-----------------------------------------------------------------------------
+def build_master_file_name(kd, master_type, date_string):
+    if master_type.lower() in ['bias', 'zero']:
+        master_file_name = f"MasterBias_{date_string}.fits"
+    elif master_type.lower() in ['dark']:
+        exptime = int(kd.exptime())
+        master_file_name = f"MasterDark_{exptime:03d}s_{date_string}.fits"
+    elif master_type.lower() in ['flat']:
+        master_file_name = f"MasterFlat_{kd.filter()}_{date_string}.fits"
+    else:
+        master_file_name = None
+    return master_file_name
+
+
+def find_master(master_directory, master_type, kd):
+    # Find master bias file
+    if master_directory is not None:
+        master_directory = Path(master_directory)
+    else:
+        return None
+    if master_directory.exists() is False:
+        return None
+
+    # Build expected file name
+    date_string = kd.obstime().strftime('%Y%m%dUT')
+    master_file_name = build_master_file_name(kd, master_type, date_string)
+    master_file = master_directory.joinpath(master_file_name)
+
+    # Go hunting for the files
+    if master_file.exists() is True:
+        return master_file
+    else:
+        # Look for bias within 10 days
+        count = 0
+        while master_file.exists() is False and count <= 10:
+            count += 1
+            # Days before
+            date_string = (kd.obstime()-timedelta(count)).strftime('%Y%m%dUT')
+            master_file_name = build_master_file_name(kd, master_type, date_string)
+            master_file = master_directory.joinpath(master_file_name)
+            if master_file.exists() is True:
+                return master_file
+            # Days after
+            date_string = (kd.obstime()+timedelta(count)).strftime('%Y%m%dUT')
+            master_file_name = build_master_file_name(kd, master_type, date_string)
+            master_file = master_directory.joinpath(master_file_name)
+            if master_file.exists() is True:
+                return master_file
+        if master_file.exists() is False:
+            return None
+        return master_file
+
+
+##-----------------------------------------------------------------------------
 ## Evaluate pre and post conditions
 ##-----------------------------------------------------------------------------
 def pre_condition(primitive, name, condition,
@@ -37,10 +92,10 @@ def pre_condition(primitive, name, condition,
                   success_level=logging.DEBUG):
     if condition is True:
         primitive.log.log(success_level,
-            f'Precondition "{name}" for {primitive.__class__.__name__} satisfied')
+            f'Precondition for {primitive.__class__.__name__} "{name}" satisfied')
     else:
         primitive.log.log(fail_level,
-            f'Precondition "{name}" for {primitive.__class__.__name__} failed')
+            f'Precondition for {primitive.__class__.__name__} "{name}" failed')
     return condition
 
 
@@ -49,10 +104,10 @@ def post_condition(primitive, name, condition,
                    success_level=logging.DEBUG):
     if condition is True:
         primitive.log.log(success_level,
-            f'Postcondition "{name}" for {primitive.__class__.__name__} satisfied')
+            f'Postcondition for {primitive.__class__.__name__} "{name}" satisfied')
     else:
         primitive.log.log(fail_level,
-            f'Postcondition "{name}" for {primitive.__class__.__name__} failed')
+            f'Postcondition for {primitive.__class__.__name__} "{name}" failed')
     return condition
 
 
@@ -171,7 +226,7 @@ class Record(BasePrimitive):
         self.log.debug(f'  Deleted {deletion.deleted_count} previous entries for {self.action.args.kd.fitsfilename}')
 
         # Save new entry for this image file
-        self.log.debug('Adding image info to mongo database')
+        self.log.debug('  Adding image info to mongo database')
         ## Save document
         try:
             inserted_id = self.action.args.images.insert_one(self.image_info).inserted_id
