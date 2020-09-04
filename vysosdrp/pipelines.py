@@ -45,7 +45,8 @@ class QuickLookPipeline(BasePipeline):
         # Bias processing
 #         "copy_bias_locally": ("CopyDataLocally", "copying_data", "save_bias_to_list"),
         "save_bias_to_list": ("SaveToList", "saving_result", "bias_stats"),
-        "bias_stats": ("ImageStats", "bias_stats", "record_bias"),
+        "bias_stats": ("ImageStats", "bias_stats", "bias_render_jpeg"),
+        "bias_render_jpeg": ("RenderJPEG", "rendering_jpeg", "record_bias"),
         "record_bias": ("Record", "recording_results_in_mongo", "stack_bias_frames"),
         "stack_bias_frames": ("StackBiases", "stacking_biases", None),
 
@@ -53,9 +54,10 @@ class QuickLookPipeline(BasePipeline):
 #         "copy_dark_locally": ("CopyDataLocally", "copying_data", "save_dark_to_list"),
         "save_dark_to_list": ("SaveToList", "saving_result", "bias_correct_dark_frames"),
         "bias_correct_dark_frames": ("BiasSubtract", "bias_correcting_darks", "dark_stats"),
-        "dark_stats": ("ImageStats", "dark_stats", "stack_dark_frames"),
-        "stack_dark_frames": ("StackDarks", "saving_result", "record_dark"),
-        "record_dark": ("Record", "recording_results_in_mongo", None),
+        "dark_stats": ("ImageStats", "dark_stats", "dark_render_jpeg"),
+        "dark_render_jpeg": ("RenderJPEG", "rendering_jpeg", "record_dark"),
+        "record_dark": ("Record", "recording_results_in_mongo", "stack_dark_frames"),
+        "stack_dark_frames": ("StackDarks", "saving_result", None),
 
         # Flat processing
 #         "copy_flat_locally": ("CopyDataLocally", "copying_data", "flat_gain_correct"),
