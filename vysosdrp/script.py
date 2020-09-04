@@ -23,9 +23,15 @@ def _parseArguments(in_args):
                       description='')
     parser.add_argument('-c', dest="config_file", type=str,
            help="Configuration file")
+    parser.add_argument("--cals", dest="cals",
+           default=False, action="store_true",
+           help="Change to watching the cals directory.")
+    parser.add_argument("--flats", dest="flats",
+           default=False, action="store_true",
+           help="Change to watching the flats directory.")
     parser.add_argument("-O", "--overwrite", dest="overwrite",
            default=False, action="store_true",
-           help="Reprocess files if they already exist in database?")
+           help="Reprocess files if they already exist in database?  Only works for analyzeone.")
     parser.add_argument("--norecord", dest="norecord",
            default=False, action="store_true",
            help="Skip recording results to mongo DB?")
@@ -107,7 +113,7 @@ def analyze_one():
 
 def watch_directory():
     args = _parseArguments(sys.argv)
-    framework = setup_framework(args)
+    framework = setup_framework(args, pipeline=QuickLookPipeline)
 
     if args.input is not '':
         p = Path(args.input).expanduser()
@@ -147,6 +153,11 @@ def change_directory():
     else:
         date_string = datetime.utcnow().strftime('%Y%m%dUT')
         newdir = Path(f'~/V20Data/Images/{date_string}').expanduser()
+        if args.cals is True:
+            newdir = Path(f'~/V20Data/Images/{date_string}/Calibration').expanduser()
+        if args.flats is True:
+            newdir = Path(f'~/V20Data/Images/{date_string}/AutoFlat').expanduser()
+
     args.input = str(newdir)
     if newdir.exists() is False:
         newdir.mkdir(parents=True)
