@@ -1,5 +1,6 @@
 import logging
 from .analysis import *
+from .extract import *
 from .image_operations import *
 from .graphics import *
 from .utils import *

@@ -37,11 +37,11 @@ class QuickLookPipeline(BasePipeline):
         "create_background": ("CreateBackground", "creating_background", "extract"),
         "extract": ("ExtractStars", "extracting_stars", "solve_astrometry"),
         "solve_astrometry": ("SolveAstrometry", "solving", "get_calibrators"),
-        "get_calibrators": ("GetCalibrationStars", "getting_calibrators", "associate_calibrators"),
-        "associate_calibrators": ("AssociateCalibratorStars", "associating_calibrators", "render_jpeg"),
+        "get_calibrators": ("GetCalibrationStars", "getting_calibrators", "calibrate_photometry"),
+        "calibrate_photometry": ("CalibratePhotometry", "measuring_calibrators", "render_jpeg"),
 
-        "get_targets": ("GetTargetStars", "getting_targets", "associate_targets"),
-        "associate_targets": ("AssociateTargetStars", "associating_targets", "render_jpeg"),
+#         "get_targets": ("GetTargetStars", "getting_targets", "associate_targets"),
+#         "associate_targets": ("AssociateTargetStars", "associating_targets", "render_jpeg"),
 
         "render_jpeg": ("RenderJPEG", "rendering_jpeg", "record"),
         "record": ("Record", "recording_results_in_mongo", None),

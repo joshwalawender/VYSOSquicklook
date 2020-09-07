@@ -114,6 +114,7 @@ def analyze_one():
 def watch_directory():
     args = _parseArguments(sys.argv)
     framework = setup_framework(args, pipeline=QuickLookPipeline)
+    # Remove existing data set
 
     if args.input is not '':
         p = Path(args.input).expanduser()

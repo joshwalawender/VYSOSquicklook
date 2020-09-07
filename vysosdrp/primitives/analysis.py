@@ -13,12 +13,10 @@ from astropy import stats
 from astropy.time import Time
 import astropy.coordinates as c
 from astropy.wcs import WCS
-from astropy.table import Table, Column
+from astropy.table import Table, Column, MaskedColumn
 from astropy.modeling import models, fitting
-from astroquery.vizier import Vizier
 import ccdproc
 import photutils
-import sep
 
 from keckdata import fits_reader, VYSOS20
 
@@ -29,13 +27,16 @@ from .utils import pre_condition, post_condition
 
 
 ##-----------------------------------------------------------------------------
-## Function: get_catalog
+## Function: download_vizier
 ##-----------------------------------------------------------------------------
-def get_catalog(pointing, radius, catalog='UCAC4', maglimit=None):
-
+def download_vizier(pointing, radius, catalog='UCAC4', band='i', maglimit=None):
+    from astroquery.vizier import Vizier
     catalogs = {'UCAC4': 'I/322A', 'Gaia': 'I/345/gaia2'}
     if catalog not in catalogs.keys():
         print(f'{catalog} not in {catalogs.keys()}')
+        raise NotImplementedError
+    if band not in ['r', 'i']:
+        print(f'Band {band} not supported')
         raise NotImplementedError
 
     columns = {'UCAC4': ['_RAJ2000', '_DEJ2000', 'rmag', 'imag'],
@@ -44,12 +45,10 @@ def get_catalog(pointing, radius, catalog='UCAC4', maglimit=None):
                   'Gaia': 'RA_ICRS'}
     dec_colname = {'UCAC4': '_DEJ2000',
                    'Gaia': 'DE_ICRS'}
-    mag_colname = {'UCAC4': 'imag',
+    mag_colname = {'UCAC4': f'{band}mag',
                    'Gaia': 'RPmag'}
     filter_string = '>0' if maglimit is None else f"<{maglimit}"
     column_filter = {mag_colname[catalog]: filter_string}
-#     column_filters = {'UCAC4': {"imag": filter_string},
-#                       'Gaia': {"RPmag": filter_string} }
 
     v = Vizier(columns=columns[catalog],
                column_filters=column_filter)
@@ -64,6 +63,39 @@ def get_catalog(pointing, radius, catalog='UCAC4', maglimit=None):
     except:
         stars = None
     return stars
+
+
+##-----------------------------------------------------------------------------
+## Function: get_panstarrs
+##-----------------------------------------------------------------------------
+def get_panstarrs(cfg, field_name, pointing, filter, maglimit=None, log=None):
+    catalogname = cfg['Photometry'].get('calibration_catalog')
+    band = {'PSi': 'i', 'PSr': 'r'}[filter]
+
+    ## First check if we have a pre-downloaded catalog for this field
+    local_catalog_path = Path(cfg['Photometry'].get('local_catalog_path', '.'))
+    local_catalog_file = local_catalog_path.joinpath(f'{field_name}.cat')
+    if local_catalog_file.exists() is True:
+        ## Read local file
+        if log: log.debug(f'  Reading {local_catalog_file}')
+        pscat = Table.read(local_catalog_file, format='ascii.csv')
+    else:
+        ## Download
+        if log: log.debug(f'  Downloading from Mast')
+        radius = 0.35 # Allow for some telescope pointing error
+        from astroquery.mast import Catalogs
+        pscat = Catalogs.query_region(pointing, radius=radius, catalog="Panstarrs")
+        if log: log.debug(f'  Got {len(pscat)} entries total')
+        pscat = pscat[pscat[f'{band}MeanApMag'].mask == False]
+        if log: log.debug(f'  Got {len(pscat)} entries with {band}-band magnitudes')
+        if log: log.debug(f'  Writing {local_catalog_file}')
+        pscat.write(local_catalog_file, format='ascii.csv')
+
+    # Filter based on magnitude
+    if maglimit is not None:
+        pscat = pscat[pscat[f'{band}MeanApMag'] <= maglimit]
+
+    return pscat
 
 
 ##-----------------------------------------------------------------------------
@@ -116,24 +148,16 @@ def estimate_f0(A, band='i'):
     i    0.79    0.16    4760    Schneider, Gunn, & Hoessel (1983)
     z    0.91    0.13    4810    Schneider, Gunn, & Hoessel (1983)
     '''
-    tabledata = [('U', 0.36, 0.15, 1810, 'Bessel (1979)'),
-                 ('B', 0.44, 0.22, 4260, 'Bessel (1979)'),
-                 ('V', 0.55, 0.16, 3640, 'Bessel (1979)'),
-                 ('R', 0.64, 0.23, 3080, 'Bessel (1979)'),
-                 ('I', 0.79, 0.19, 2550, 'Bessel (1979)'),
-                 ('J', 1.26, 0.16, 1600, 'Campins, Reike, & Lebovsky (1985)'),
-                 ('H', 1.60, 0.23, 1080, 'Campins, Reike, & Lebovsky (1985)'),
-                 ('K', 2.22, 0.23, 670 , 'Campins, Reike, & Lebovsky (1985)'),
-                 ('g', 0.52, 0.14, 3730, 'Schneider, Gunn, & Hoessel (1983)'),
-                 ('r', 0.67, 0.14, 4490, 'Schneider, Gunn, & Hoessel (1983)'),
-                 ('i', 0.79, 0.16, 4760, 'Schneider, Gunn, & Hoessel (1983)'),
-                 ('z', 0.91, 0.13, 4810, 'Schneider, Gunn, & Hoessel (1983)'),
-                ]
-    t = Table(tabledata, names=('band', 'cent', 'dl/l', 'Flux0', 'Reference'))
+    tabledata = {'band': ['U', 'B', 'V', 'R', 'I', 'J', 'H', 'K', 'g', 'r', 'i', 'z'],
+                 'cent': [0.36, 0.44, 0.55, 0.64, 0.79, 1.26, 1.60, 2.22, 0.52, 0.67, 0.79, 0.91],
+                 'dl/l': [0.15, 0.22, 0.16, 0.23, 0.19, 0.16, 0.23, 0.23, 0.14, 0.14, 0.16, 0.13],
+                 'Flux0': [1810, 4260, 3640, 3080, 2550, 1600, 1080, 670 , 3730, 4490, 4760, 4810],
+                }
+    t = Table(tabledata)
     band = t[t['band'] == band]
     dl = 0.16 # dl/l (for i band)
     f0 = band['Flux0'] * 1.51e7 * A * band['dl/l'] # photons / sec
-    return f0
+    return f0[0]
 
 
 ##-----------------------------------------------------------------------------
@@ -190,7 +214,7 @@ class MoonInfo(BasePrimitive):
         moon_separation = (moon.separation(self.action.args.header_pointing).to(u.degree)).value\
                     if self.action.args.header_pointing is not None else None
 
-        # Moon illumination formula from Meeus, â€œAstronomical 
+        # Moon illumination formula from Meeus, ÒAstronomical 
         # Algorithms". Formulae 46.1 and 46.2 in the 1991 edition, 
         # using the approximation cos(psi) \approx -cos(i). Error 
         # should be no more than 0.0014 (p. 316). 
@@ -201,200 +225,6 @@ class MoonInfo(BasePrimitive):
         self.action.args.moon_alt = moon_alt
         self.action.args.moon_separation = moon_separation
         self.action.args.moon_illum = moon_illum
-
-        return self.action.args
-
-
-##-----------------------------------------------------------------------------
-## Primitive: MakeSourceMask
-##-----------------------------------------------------------------------------
-class MakeSourceMask(BasePrimitive):
-    """
-    This is a template for primitives, which is usually an action.
-
-    The methods in the base class can be overloaded:
-    - _pre_condition
-    - _post_condition
-    - _perform
-    - apply
-    - __call__
-    """
-
-    def __init__(self, action, context):
-        BasePrimitive.__init__(self, action, context)
-        self.log = context.pipeline_logger
-
-    def _pre_condition(self):
-        """Check for conditions necessary to run this process"""
-        checks = [pre_condition(self, 'Skip image is not set',
-                                not self.action.args.skip),
-                 ]
-        return np.all(checks)
-
-    def _post_condition(self):
-        """Check for conditions necessary to verify that the process run correctly"""
-        checks = []
-        return np.all(checks)
-
-    def _perform(self):
-        """
-        Returns an Argument() with the parameters that depends on this operation.
-        """
-        self.log.info(f"Running {self.__class__.__name__} action")
-        snr = 5
-        npixels = 5
-        self.action.args.source_mask = [None]*len(self.action.args.kd.pixeldata)
-        for i,pd in enumerate(self.action.args.kd.pixeldata):
-            source_mask = photutils.make_source_mask(pd, snr, npixels)
-            self.action.args.source_mask[i] = source_mask
-
-        return self.action.args
-
-
-##-----------------------------------------------------------------------------
-## Primitive: ExtractStars
-##-----------------------------------------------------------------------------
-class ExtractStars(BasePrimitive):
-    """
-    This is a template for primitives, which is usually an action.
-
-    The methods in the base class can be overloaded:
-    - _pre_condition
-    - _post_condition
-    - _perform
-    - apply
-    - __call__
-    """
-
-    def __init__(self, action, context):
-        BasePrimitive.__init__(self, action, context)
-        self.log = context.pipeline_logger
-        self.cfg = self.context.config.instrument
-
-    def _pre_condition(self):
-        """Check for conditions necessary to run this process"""
-        checks = [pre_condition(self, 'Skip image is not set',
-                                not self.action.args.skip),
-                  pre_condition(self, 'Background has been generated',
-                                self.action.args.background is not None),
-                 ]
-        return np.all(checks)
-
-    def _post_condition(self):
-        """Check for conditions necessary to verify that the process run correctly"""
-        checks = []
-        return np.all(checks)
-
-    def _perform(self):
-        """
-        Returns an Argument() with the parameters that depends on this operation.
-        """
-        self.log.info(f"Running {self.__class__.__name__} action")
-
-        exptime = float(self.action.args.kd.get('EXPTIME'))
-
-        # Photutils StarFinder
-#         extract_fwhm = self.cfg['Extract'].getfloat('extract_fwhm', 5)
-#         thresh = self.cfg['Extract'].getint('extract_threshold', 9)
-#         pixel_scale = self.cfg['Telescope'].getfloat('pixel_scale', 1)
-#         pd = self.action.args.kd.pixeldata[0]
-#         mean, median, std = stats.sigma_clipped_stats(pd.data, sigma=3.0)
-#         # daofind = photutils.DAOStarFinder(fwhm=extract_fwhm, threshold=thresh*std)  
-#         starfind = photutils.IRAFStarFinder(thresh*std, extract_fwhm)  
-#         sources = starfind(pd.data)
-#         self.log.info(f'  Found {len(sources):d} stars')
-#         self.log.info(sources.keys())
-# 
-#         self.action.args.objects = sources
-#         self.action.args.objects.sort('flux')
-#         self.action.args.objects.reverse()
-#         self.action.args.n_objects = len(sources)
-#         if self.action.args.n_objects == 0:
-#             self.log.warning('No stars found')
-#             self.action.args.fwhm = np.nan
-#             self.action.args.ellipticity = np.nan
-#         else:
-#             FWHM_pix = np.median(sources['fwhm'])
-#             roundness = np.median(sources['roundness'])
-#             self.log.info(f'  Median FWHM = {FWHM_pix:.1f} pix ({FWHM_pix*pixel_scale:.2f} arcsec)')
-#             self.log.info(f'  roundness = {roundness:.2f}')
-#             self.action.args.fwhm = FWHM_pix
-#             self.action.args.ellipticity = np.nan
-
-        # Source Extractor
-        pixel_scale = self.cfg['Telescope'].getfloat('pixel_scale', 1)
-        thresh = self.cfg['Extract'].getint('extract_threshold', 9)
-        minarea = self.cfg['Extract'].getint('extract_minarea', 7)
-        mina = self.cfg['Extract'].getfloat('fwhm_mina', 1)
-        minb = self.cfg['Extract'].getfloat('fwhm_minb', 1)
-
-        bsub = self.action.args.kd.pixeldata[0].data - self.action.args.background[0].background
-        try:
-            objects = sep.extract(bsub,
-                                  err=self.action.args.kd.pixeldata[0].uncertainty.array,
-                                  mask=self.action.args.kd.pixeldata[0].mask,
-                                  thresh=float(thresh), minarea=minarea)
-        except Exception as e:
-            self.log.error('Source extractor failed')
-            self.log.error(e)
-            return self.action.args
-
-        t = Table(objects)
-        t['flux'] /= exptime
-
-        ny, nx = bsub.shape
-        r = np.sqrt((t['x']-nx/2.)**2 + (t['y']-ny/2.)**2)
-        t.add_column(Column(data=r.data, name='r', dtype=np.float))
-
-        coef = 2*np.sqrt(2*np.log(2))
-        fwhm = np.sqrt((coef*t['a'])**2 + (coef*t['b'])**2)
-        t.add_column(Column(data=fwhm.data, name='FWHM', dtype=np.float))
-
-        ellipticities = t['a']/t['b']
-        t.add_column(Column(data=ellipticities.data, name='ellipticity', dtype=np.float))
-
-        filtered = (t['a'] < mina) | (t['b'] < minb) | (t['flag'] > 0)
-        self.log.debug(f'  Removing {np.sum(filtered):d}/{len(filtered):d}'\
-                       f' extractions from FWHM calculation')
-        self.action.args.n_objects = len(t[~filtered])
-        self.log.info(f'  Found {self.action.args.n_objects:d} stars')
-
-        self.action.args.objects = t[~filtered]
-        self.action.args.objects.sort('flux')
-        self.action.args.objects.reverse()
-
-        if self.action.args.n_objects == 0:
-            self.log.warning('No stars found')
-        else:
-            FWHM_pix = np.median(t['FWHM'][~filtered])
-            ellipticity = np.median(t['ellipticity'][~filtered])
-            self.log.info(f'  Median FWHM = {FWHM_pix:.1f} pix ({FWHM_pix*pixel_scale:.2f} arcsec)')
-            self.log.info(f'  ellipticity = {ellipticity:.2f}')
-            self.action.args.fwhm = FWHM_pix
-            self.action.args.ellipticity = ellipticity
-
-        ## Do second photometry measurement
-        positions = [(det['x'], det['y']) for det in self.action.args.objects]
-        ap_radius = int(2.0*FWHM_pix)
-        star_apertures = photutils.CircularAperture(positions, ap_radius)
-        sky_apertures = photutils.CircularAnnulus(positions,
-                                                  r_in=int(np.ceil(1.5*ap_radius)),
-                                                  r_out=int(np.ceil(2.0*ap_radius)))
-        phot_table = photutils.aperture_photometry(
-                               self.action.args.kd.pixeldata[0],
-                               [star_apertures, sky_apertures])
-        phot_table['sky'] = phot_table['aperture_sum_1'] / sky_apertures.area()
-        med_sky = np.median(phot_table['sky'])
-        self.log.info(f'  Median Sky = {med_sky.value:.0f} e-/pix')
-        self.action.args.sky_background = med_sky.value
-        self.action.args.objects.add_column(phot_table['sky'])
-        bkg_sum = phot_table['aperture_sum_1'] / sky_apertures.area() * star_apertures.area()
-        final_sum = (phot_table['aperture_sum_0'] - bkg_sum)/exptime
-        where_bad = (final_sum <= 0)
-        phot_table['flux2'] = final_sum
-        self.action.args.objects.add_column(phot_table['flux2'])
-        self.action.args.objects = self.action.args.objects[~where_bad]
-        self.log.info(f'  Fluxes for {self.action.args.n_objects:d} stars')
 
         return self.action.args
 
@@ -636,8 +466,9 @@ class GetCalibrationStars(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        catalog = self.cfg['jpeg'].get('catalog', None)
-        known_catalogs = ['Gaia', 'UCAC4']
+        catalog = self.cfg['Photometry'].get('calibration_catalog', '')
+#         known_catalogs = ['Gaia', 'UCAC4', 'PanSTARRS']
+        known_catalogs = ['PanSTARRS']
         checks = [pre_condition(self, 'Skip image is not set',
                                 not self.action.args.skip),
                   pre_condition(self, 'Found existing WCS',
@@ -658,33 +489,25 @@ class GetCalibrationStars(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
 
-        catalogname = self.cfg['Photometry'].get('calibration_catalog')
-        maglimit = self.cfg['Photometry'].get('calibration_maglimit')
+        pscat = get_panstarrs(self.cfg,
+                              self.action.args.kd.get('OBJECT'),
+                              self.action.args.header_pointing.to_string('decimal'),
+                              self.action.args.kd.filter(),
+                              maglimit=self.cfg['Photometry'].getfloat('calibration_maglimit', 25),
+                              log=self.log,
+                              )
 
-        fp = self.action.args.wcs.calc_footprint(axes=self.action.args.kd.pixeldata[0].data.shape)
-        dra = fp[:,0].max() - fp[:,0].min()
-        ddec = fp[:,1].max() - fp[:,1].min()
-        radius = np.sqrt((dra*np.cos(fp[:,1].mean()*np.pi/180.))**2 + ddec**2)/2.
-
-        if self.action.args.wcs_pointing is not None:
-            self.log.debug('  Using WCS pointing for catalog query')
-            pointing = self.action.args.wcs_pointing
-        else:
-            self.log.warning('Using header pointing for catalog query')
-            pointing = self.action.args.header_pointing
-
-        self.log.info(f"Retrieving {catalogname} entries (magnitude < {maglimit})")
-        self.action.args.catalog = get_catalog(pointing, radius, catalog=catalogname, maglimit=maglimit)
-        ncat = len(self.action.args.catalog) if self.action.args.catalog is not None else 0
-        self.log.info(f"  Found {ncat} catalog entries")
+        self.action.args.calibration_catalog = pscat
+        ncat = len(self.action.args.calibration_catalog) if self.action.args.calibration_catalog is not None else 0
+        self.log.info(f"  Found {ncat} catalog entries for calibration")
 
         return self.action.args
 
 
 ##-----------------------------------------------------------------------------
-## Primitive: AssociateCalibratorStars
+## Primitive: CalibratePhotometry
 ##-----------------------------------------------------------------------------
-class AssociateCalibratorStars(BasePrimitive):
+class CalibratePhotometry(BasePrimitive):
     """
     This is a template for primitives, which is usually an action.
 
@@ -705,10 +528,8 @@ class AssociateCalibratorStars(BasePrimitive):
         """Check for conditions necessary to run this process"""
         checks = [pre_condition(self, 'Skip image is not set',
                                 not self.action.args.skip),
-                  pre_condition(self, 'Have extracted objects',
-                                self.action.args.objects is not None),
-                  pre_condition(self, 'Have catalog objects',
-                                self.action.args.catalog is not None),
+                  pre_condition(self, 'Calibration catalog exists',
+                                self.action.args.calibration_catalog is not None),
                  ]
         return np.all(checks)
 
@@ -722,52 +543,113 @@ class AssociateCalibratorStars(BasePrimitive):
         Returns an Argument() with the parameters that depends on this operation.
         """
         self.log.info(f"Running {self.__class__.__name__} action")
+        nx, ny = self.action.args.kd.pixeldata[0].shape
 
-        pixel_scale = self.cfg['Telescope'].getfloat('pixel_scale', 1) * u.arcsec/u.pix
-        assoc_radius = self.cfg['Photometry'].getfloat('accoc_radius', 1)\
-                       * self.action.args.fwhm*u.pix\
-                       * pixel_scale
-        associated = Table(names=('RA', 'DEC', 'x', 'y', 'assoc_distance', 'mag', 'catflux', 'flux', 'flux2', 'instmag', 'FWHM'),
-                           dtype=('f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8') )
+        ## Do photometry measurement
+        self.log.debug(f'  Add pixel positions to catalog')
+        x, y = self.action.args.wcs.all_world2pix(self.action.args.calibration_catalog['raMean'],
+                                                  self.action.args.calibration_catalog['decMean'], 1)
+        self.action.args.calibration_catalog.add_column(Column(data=x, name='x'))
+        self.action.args.calibration_catalog.add_column(Column(data=y, name='y'))
 
-        catalog_coords = c.SkyCoord(self.action.args.catalog['RA'], self.action.args.catalog['DEC'])
+        buffer = 10
+        in_image = (self.action.args.calibration_catalog['x'] > buffer)\
+                   & (self.action.args.calibration_catalog['x'] < nx-buffer)\
+                   & (self.action.args.calibration_catalog['y'] > buffer)\
+                   & (self.action.args.calibration_catalog['y'] < ny-buffer)
+        self.log.debug(f'  Only {np.sum(in_image)} stars are within image pixel boundaries')
+        self.action.args.calibration_catalog = self.action.args.calibration_catalog[in_image]
 
+        positions = [p for p in zip(self.action.args.calibration_catalog['x'],
+                                    self.action.args.calibration_catalog['y'])]
+
+        self.log.debug(f'  Attemping shape measurement for {len(positions)} stars')
+        fwhm = list()
+        elliptiticty = list()
+        orientation = list()
+        xcentroid = list()
+        ycentroid = list()
+        for i, entry in enumerate(self.action.args.calibration_catalog):
+            xi = int(x[i])
+            yi = int(y[i])
+            if xi > 10 and xi < nx-10 and yi > 10 and yi < ny-10:
+                im = self.action.args.kd.pixeldata[0].data[yi-10:yi+10,xi-10:xi+10]
+                properties = photutils.data_properties(im)
+                fwhm.append(2.355*(properties.semimajor_axis_sigma.value**2\
+                            + properties.semiminor_axis_sigma.value**2)**0.5)
+                orientation.append(properties.orientation.to(u.deg).value)
+                elliptiticty.append(properties.elongation)
+                xcentroid.append(properties.xcentroid.value)
+                ycentroid.append(properties.ycentroid.value)
+            else:
+                fwhm.append(np.nan)
+                orientation.append(np.nan)
+                elliptiticty.append(np.nan)
+                xcentroid.append(np.nan)
+                ycentroid.append(np.nan)
+        wnan = np.isnan(fwhm)
+        nmasked = np.sum(wnan)
+        self.log.info(f"  Measured {len(fwhm)-nmasked} indivisual FWHM values")
+        self.action.args.calibration_catalog.add_column(MaskedColumn(
+                data=fwhm, name='FWHM', mask=wnan))
+        self.action.args.calibration_catalog.add_column(MaskedColumn(
+                data=orientation, name='orientation', mask=wnan))
+        self.action.args.calibration_catalog.add_column(MaskedColumn(
+                data=elliptiticty, name='elliptiticty', mask=wnan))
+        self.action.args.calibration_catalog.add_column(MaskedColumn(
+                data=xcentroid, name='xcentroid', mask=wnan))
+        self.action.args.calibration_catalog.add_column(MaskedColumn(
+                data=ycentroid, name='ycentroid', mask=wnan))
+
+
+        self.log.debug(f'  Attemping aperture photometry for {len(positions)} stars')
+        FWHM_pix = self.action.args.fwhm if self.action.args.fwhm is not None else 8
+        ap_radius = int(2.0*FWHM_pix)
+        star_apertures = photutils.CircularAperture(positions, ap_radius)
+        sky_apertures = photutils.CircularAnnulus(positions,
+                                                  r_in=int(np.ceil(1.5*ap_radius)),
+                                                  r_out=int(np.ceil(2.0*ap_radius)))
+        self.log.debug(f'  Running photutils.aperture_photometry')
+        phot_table = photutils.aperture_photometry(
+                               self.action.args.kd.pixeldata[0].data,
+                               [star_apertures, sky_apertures])
+
+        self.log.debug(f'  Subtracting sky flux')
+        phot_table['sky'] = phot_table['aperture_sum_1'] / sky_apertures.area()
+        med_sky = np.nanmedian(phot_table['sky'])
+        self.log.info(f'  Median Sky = {med_sky:.0f} e-/pix')
+        self.action.args.sky_background = med_sky
+        self.action.args.calibration_catalog.add_column(phot_table['sky'])
+        bkg_sum = phot_table['aperture_sum_1'] / sky_apertures.area() * star_apertures.area()
+        final_sum = (phot_table['aperture_sum_0'] - bkg_sum)/self.action.args.kd.exptime()
+        phot_table['flux'] = final_sum
+        self.action.args.calibration_catalog.add_column(phot_table['flux'])
+        wzero = (self.action.args.calibration_catalog['flux'] < 0)
+        self.log.debug(f'  Masking {np.sum(wzero)} stars with <0 flux')
+        self.action.args.calibration_catalog['flux'].mask = wzero
+
+
+        # Estimate flux from catalog magnitude
+        self.log.debug(f'  Estimate flux from catalog magnitude')
         d_telescope = self.cfg['Telescope'].getfloat('d_primary_mm', 508)
         d_obstruction = self.cfg['Telescope'].getfloat('d_obstruction_mm', 127)
         A = 3.14*(d_telescope/2/1000)**2 - 3.14*(d_obstruction/2/1000)**2 # m^2
-        self.action.args.f0 = estimate_f0(A, band='i') # photons / sec
+        self.action.args.f0 = estimate_f0(A, band=self.action.args.band) # photons / sec
+        catflux = self.action.args.f0\
+                  * 10**(-self.action.args.calibration_catalog[f'{self.action.args.band}MeanApMag']/2.512)
+        self.action.args.calibration_catalog.add_column(Column(data=catflux*u.photon/u.second,
+                                                               name='catflux'))
 
-        for detected in self.action.args.objects:
-            ra_deg, dec_deg = self.action.args.wcs.all_pix2world(detected['x'], detected['y'], 1)
-            detected_coord = c.SkyCoord(ra_deg, dec_deg, frame='fk5', unit=(u.deg, u.deg))
-            idx, d2d, d3d = detected_coord.match_to_catalog_sky(catalog_coords)
-            if d2d[0].to(u.arcsec) < assoc_radius.to(u.arcsec):
-                associated.add_row( {'RA': self.action.args.catalog[idx]['RA'],
-                                     'DEC': self.action.args.catalog[idx]['DEC'],
-                                     'x': detected['x'],
-                                     'y': detected['y'],
-                                     'assoc_distance': d2d[0].to(u.arcsec).value, 
-                                     'mag': self.action.args.catalog[idx]['mag'],
-                                     'catflux': self.action.args.f0 * 10**(-self.action.args.catalog[idx]['mag']/2.512), # phot/sec
-                                     'flux': detected['flux'],
-                                     'instmag': -2.512*np.log(detected['flux']),
-                                     'flux2': detected['flux2'],
-                                     'FWHM': detected['FWHM'],
-                                     } )
-        if len(associated) < 2:
-            self.action.args.associated = None
-            return self.action.args
-
-        self.log.info(f'  Associated {len(associated)} catalogs stars')
-        self.action.args.associated = associated
-        self.action.args.associated.sort('catflux')
-        nclip = int(np.floor(0.05*len(associated['catflux'])))
-        fitted_line = sigma_clipping_line_fit(associated['catflux'][nclip:-nclip],
-                                              associated['flux2'][nclip:-nclip],
+        self.log.debug(f'  Fit, clipping brightest 5% and faintest 5% of stars')
+        bad = (self.action.args.calibration_catalog['flux'].mask == True)
+        nclip = int(np.floor(0.05*len(self.action.args.calibration_catalog[~bad])))
+        fitted_line = sigma_clipping_line_fit(self.action.args.calibration_catalog[~bad]['catflux'][nclip:-nclip].data,
+                                              self.action.args.calibration_catalog[~bad]['flux'][nclip:-nclip].data,
                                               intercept_fixed=True)
         self.log.info(f"  Slope (e-/photon) = {fitted_line.slope.value:.3g}")
         self.action.args.zero_point_fit = fitted_line
-        deltas = associated['flux2'] - fitted_line(associated['catflux'])
+        deltas = self.action.args.calibration_catalog['flux'].data\
+               - fitted_line(self.action.args.calibration_catalog['catflux'].data)
         mean, med, std = stats.sigma_clipped_stats(deltas)
         self.log.info(f"  Fit StdDev = {std:.2g}")
 
@@ -802,6 +684,8 @@ class GetTargetStars(BasePrimitive):
                                 not self.action.args.skip),
                   pre_condition(self, 'Found existing WCS',
                                 self.action.args.wcs is not None),
+                  pre_condition(self, 'Found existing WCS pointing',
+                                self.action.args.wcs_pointing is not None),
                   pre_condition(self, f'Catalog {catalog} is known',
                                 catalog in known_catalogs),
                  ]
@@ -818,124 +702,17 @@ class GetTargetStars(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
 
-        catalogname = self.cfg['Photometry'].get('target_catalog')
-        maglimit = self.cfg['Photometry'].get('target_maglimit')
+        pscat = get_panstarrs(self.cfg,
+                              self.action.args.kd.get('OBJECT'),
+                              self.action.args.wcs_pointing.to_string('decimal'),
+                              self.action.args.kd.filter(),
+                              maglimit=self.cfg['Photometry'].getfloat('target_maglimit', 17),
+                              log=self.log,
+                              )
 
-        fp = self.action.args.wcs.calc_footprint(axes=self.action.args.kd.pixeldata[0].data.shape)
-        dra = fp[:,0].max() - fp[:,0].min()
-        ddec = fp[:,1].max() - fp[:,1].min()
-        radius = np.sqrt((dra*np.cos(fp[:,1].mean()*np.pi/180.))**2 + ddec**2)/2.
-
-        if self.action.args.wcs_pointing is not None:
-            self.log.debug('  Using WCS pointing for catalog query')
-            pointing = self.action.args.wcs_pointing
-        else:
-            self.log.warning('Using header pointing for catalog query')
-            pointing = self.action.args.header_pointing
-
-        self.log.info(f"Retrieving {catalogname} entries (magnitude < {maglimit})")
-        self.action.args.target_catalog = get_catalog(pointing, radius, catalog=catalogname, maglimit=maglimit)
+        self.action.args.target_catalog = pscat
         ncat = len(self.action.args.target_catalog) if self.action.args.target_catalog is not None else 0
-        self.log.info(f"  Found {ncat} target catalog entries")
-
-        return self.action.args
-
-
-##-----------------------------------------------------------------------------
-## Primitive: AssociateTargetStars
-##-----------------------------------------------------------------------------
-class AssociateTargetStars(BasePrimitive):
-    """
-    This is a template for primitives, which is usually an action.
-
-    The methods in the base class can be overloaded:
-    - _pre_condition
-    - _post_condition
-    - _perform
-    - apply
-    - __call__
-    """
-
-    def __init__(self, action, context):
-        BasePrimitive.__init__(self, action, context)
-        self.log = context.pipeline_logger
-        self.cfg = self.context.config.instrument
-
-    def _pre_condition(self):
-        """Check for conditions necessary to run this process"""
-        checks = [pre_condition(self, 'Skip image is not set',
-                                not self.action.args.skip),
-                  pre_condition(self, 'Have extracted objects',
-                                self.action.args.objects is not None),
-                  pre_condition(self, 'Have target catalog objects',
-                                self.action.args.target_catalog is not None),
-                 ]
-        return np.all(checks)
-
-    def _post_condition(self):
-        """Check for conditions necessary to verify that the process run correctly"""
-        checks = []
-        return np.all(checks)
-
-    def _perform(self):
-        """
-        Returns an Argument() with the parameters that depends on this operation.
-        """
-        self.log.info(f"Running {self.__class__.__name__} action")
-
-        pixel_scale = self.cfg['Telescope'].getfloat('pixel_scale', 1) * u.arcsec/u.pix
-        assoc_radius = self.cfg['Photometry'].getfloat('accoc_radius', 1)\
-                       * self.action.args.fwhm*u.pix\
-                       * pixel_scale
-        associated = Table(names=('RA', 'DEC', 'x', 'y', 'assoc_distance', 'mag', 'catflux', 'flux', 'flux2', 'instmag', 'FWHM'),
-                           dtype=('f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8') )
-
-        catalog_coords = c.SkyCoord(self.action.args.target_catalog['RA'],
-                                    self.action.args.target_catalog['DEC'])
-
-        band = 4760 # Jy (for i band)
-        dl = 0.16 # dl/l (for i band)
-        d_telescope = self.cfg['Telescope'].getfloat('d_primary_mm', 508)
-        d_obstruction = self.cfg['Telescope'].getfloat('d_obstruction_mm', 127)
-        A = 3.14*(d_telescope/2/1000)**2 - 3.14*(d_obstruction/2/1000)**2 # m^2
-        # 1 Jy = 1.51e7 photons sec^-1 m^-2 (dlambda/lambda)^-1
-        # https://archive.is/20121204144725/http://www.astro.utoronto.ca/~patton/astro/mags.html#selection-587.2-587.19
-        self.action.args.f0 = band * 1.51e7 * A * dl # photons / sec
-
-        for detected in self.action.args.objects:
-            ra_deg, dec_deg = self.action.args.wcs.all_pix2world(detected['x'], detected['y'], 1)
-            detected_coord = c.SkyCoord(ra_deg, dec_deg, frame='fk5', unit=(u.deg, u.deg))
-            idx, d2d, d3d = detected_coord.match_to_catalog_sky(catalog_coords)
-            if d2d[0].to(u.arcsec) < assoc_radius.to(u.arcsec):
-                associated.add_row( {'RA': self.action.args.target_catalog[idx]['RA'],
-                                     'DEC': self.action.args.target_catalog[idx]['DEC'],
-                                     'x': detected['x'],
-                                     'y': detected['y'],
-                                     'assoc_distance': d2d[0].to(u.arcsec).value, 
-                                     'mag': self.action.args.target_catalog[idx]['mag'],
-                                     'catflux': self.action.args.f0 * 10**(-self.action.args.target_catalog[idx]['mag']/2.512), # phot/sec
-                                     'flux': detected['flux'],
-                                     'instmag': -2.512*np.log(detected['flux']),
-                                     'flux2': detected['flux2'],
-                                     'FWHM': detected['FWHM'],
-                                     } )
-        if len(associated) < 2:
-            self.action.args.associated = None
-            return self.action.args
-
-        self.log.info(f'  Measured {len(associated)} target catalog stars')
-        self.action.args.measured = associated
-        self.action.args.measured.sort('flux')
-
-#         nclip = int(np.floor(0.05*len(associated['catflux'])))
-#         fitted_line = sigma_clipping_line_fit(associated['catflux'][nclip:-nclip],
-#                                               associated['flux2'][nclip:-nclip],
-#                                               intercept_fixed=True)
-#         self.log.info(f"  Slope (e-/photon) = {fitted_line.slope.value:.3g}")
-#         self.action.args.zero_point_fit = fitted_line
-#         deltas = associated['flux2'] - fitted_line(associated['catflux'])
-#         mean, med, std = stats.sigma_clipped_stats(deltas)
-#         self.log.info(f"  Fit StdDev = {std:.2g}")
+        self.log.info(f"  Found {ncat} entries in target catalog")
 
         return self.action.args
 

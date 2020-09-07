@@ -160,6 +160,8 @@ class PrepareScience(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
 
+        self.action.args.band = {'PSi': 'i', 'PSr': 'r'}[self.action.args.kd.filter()]
+
         # Extract header pointing
         try:
             self.action.args.header_pointing = c.SkyCoord(self.action.args.kd.get('RA'),
@@ -431,6 +433,8 @@ class CreateBackground(BasePrimitive):
         """Check for conditions necessary to run this process"""
         checks = [pre_condition(self, 'Skip image is not set',
                                 not self.action.args.skip),
+                  pre_condition(self, 'Extraction requested',
+                                self.cfg['Extract'].getboolean('do_extraction', False) is True),
                  ]
         return np.all(checks)
 
