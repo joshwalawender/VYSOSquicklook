@@ -14,7 +14,6 @@ from astropy.time import Time
 import astropy.coordinates as c
 from astropy.wcs import WCS
 from astropy.table import Table, Column, MaskedColumn
-from astropy.modeling import models, fitting
 import ccdproc
 import photutils
 import sep
@@ -23,6 +22,7 @@ from keckdrpframework.primitives.base_primitive import BasePrimitive
 from keckdrpframework.models.arguments import Arguments
 
 from .utils import pre_condition, post_condition
+from .utils import pre_condition, post_condition, sigma_clipping_line_fit, estimate_f0
 
 
 ##-----------------------------------------------------------------------------
@@ -198,9 +198,9 @@ class ExtractStars(BasePrimitive):
             self.action.args.fwhm = FWHM_pix
             self.action.args.ellipticity = ellipticity
 
-        ## Do second photometry measurement
+        ## Do photutils photometry measurement
         positions = [(det['x'], det['y']) for det in self.action.args.objects]
-        ap_radius = int(2.0*FWHM_pix)
+        ap_radius = self.cfg['Photometry'].getfloat('aperture_radius', 2)*FWHM_pix
         star_apertures = photutils.CircularAperture(positions, ap_radius)
         sky_apertures = photutils.CircularAnnulus(positions,
                                                   r_in=int(np.ceil(1.5*ap_radius)),
@@ -214,15 +214,26 @@ class ExtractStars(BasePrimitive):
         self.action.args.sky_background = med_sky.value
         self.action.args.objects.add_column(phot_table['sky'])
         bkg_sum = phot_table['aperture_sum_1'] / sky_apertures.area() * star_apertures.area()
-        final_sum = (phot_table['aperture_sum_0'] - bkg_sum)/exptime
+        final_sum = (phot_table['aperture_sum_0'] - bkg_sum)
+        final_uncert = (bkg_sum + final_sum)**0.5 * u.electron**0.5
+        phot_table['apflux'] = final_sum/exptime
+        self.action.args.objects.add_column(phot_table['apflux'])
+        phot_table['apuncert'] = final_uncert/exptime
+        self.action.args.objects.add_column(phot_table['apuncert'])
+        phot_table['snr'] = final_sum/final_uncert
+        self.action.args.objects.add_column(phot_table['snr'])
+
         where_bad = (final_sum <= 0)
-        phot_table['flux2'] = final_sum
-        self.action.args.objects.add_column(phot_table['flux2'])
+        self.log.info(f'  {np.sum(where_bad)} stars rejected for flux < 0')
         self.action.args.objects = self.action.args.objects[~where_bad]
+
+#         where_low_snr = (self.action.args.objects['snr'] <= 5)
+#         self.log.info(f'  {np.sum(where_low_snr)} stars rejected for SNR < 5')
+#         self.action.args.objects = self.action.args.objects[~where_low_snr]
+
         self.log.info(f'  Fluxes for {self.action.args.n_objects:d} stars')
 
         return self.action.args
-
 
 
 ##-----------------------------------------------------------------------------
@@ -252,7 +263,7 @@ class AssociateCalibratorStars(BasePrimitive):
                   pre_condition(self, 'Have extracted objects',
                                 self.action.args.objects is not None),
                   pre_condition(self, 'Have catalog objects',
-                                self.action.args.catalog is not None),
+                                self.action.args.calibration_catalog is not None),
                  ]
         return np.all(checks)
 
@@ -271,10 +282,12 @@ class AssociateCalibratorStars(BasePrimitive):
         assoc_radius = self.cfg['Photometry'].getfloat('accoc_radius', 1)\
                        * self.action.args.fwhm*u.pix\
                        * pixel_scale
-        associated = Table(names=('RA', 'DEC', 'x', 'y', 'assoc_distance', 'mag', 'catflux', 'flux', 'flux2', 'instmag', 'FWHM'),
-                           dtype=('f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8') )
+        associated = Table(names=('RA', 'DEC', 'x', 'y', 'assoc_distance', 'mag', 'catflux', 'flux', 'apflux', 'instmag', 'snr', 'FWHM'),
+                           dtype=('f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8') )
 
-        catalog_coords = c.SkyCoord(self.action.args.catalog['RA'], self.action.args.catalog['DEC'])
+        catalog_coords = c.SkyCoord(self.action.args.calibration_catalog['raMean'],
+                                    self.action.args.calibration_catalog['decMean'],
+                                    unit=(u.deg, u.deg))
 
         d_telescope = self.cfg['Telescope'].getfloat('d_primary_mm', 508)
         d_obstruction = self.cfg['Telescope'].getfloat('d_obstruction_mm', 127)
@@ -286,34 +299,36 @@ class AssociateCalibratorStars(BasePrimitive):
             detected_coord = c.SkyCoord(ra_deg, dec_deg, frame='fk5', unit=(u.deg, u.deg))
             idx, d2d, d3d = detected_coord.match_to_catalog_sky(catalog_coords)
             if d2d[0].to(u.arcsec) < assoc_radius.to(u.arcsec):
-                associated.add_row( {'RA': self.action.args.catalog[idx]['RA'],
-                                     'DEC': self.action.args.catalog[idx]['DEC'],
+                associated.add_row( {'RA': self.action.args.calibration_catalog[idx]['raMean'],
+                                     'DEC': self.action.args.calibration_catalog[idx]['decMean'],
                                      'x': detected['x'],
                                      'y': detected['y'],
                                      'assoc_distance': d2d[0].to(u.arcsec).value, 
-                                     'mag': self.action.args.catalog[idx]['mag'],
-                                     'catflux': self.action.args.f0 * 10**(-self.action.args.catalog[idx]['mag']/2.512), # phot/sec
+                                     'mag': self.action.args.calibration_catalog[idx][f'{self.action.args.band}MeanApMag'],
+                                     'catflux': self.action.args.f0 * 10**(-self.action.args.calibration_catalog[idx][f'{self.action.args.band}MeanApMag']/2.5), # phot/sec
                                      'flux': detected['flux'],
-                                     'instmag': -2.512*np.log(detected['flux']),
-                                     'flux2': detected['flux2'],
+                                     'instmag': -2.5*np.log10(detected['apflux'].value),
+                                     'apflux': detected['apflux'].value,
+                                     'snr': detected['snr'].value,
                                      'FWHM': detected['FWHM'],
                                      } )
         if len(associated) < 2:
-            self.action.args.associated = None
+            self.action.args.associated_calibrators = None
             return self.action.args
 
         self.log.info(f'  Associated {len(associated)} catalogs stars')
-        self.action.args.associated = associated
-        self.action.args.associated.sort('catflux')
-        nclip = int(np.floor(0.05*len(associated['catflux'])))
-        fitted_line = sigma_clipping_line_fit(associated['catflux'][nclip:-nclip],
-                                              associated['flux2'][nclip:-nclip],
-                                              intercept_fixed=True)
-        self.log.info(f"  Slope (e-/photon) = {fitted_line.slope.value:.3g}")
-        self.action.args.zero_point_fit = fitted_line
-        deltas = associated['flux2'] - fitted_line(associated['catflux'])
-        mean, med, std = stats.sigma_clipped_stats(deltas)
-        self.log.info(f"  Fit StdDev = {std:.2g}")
+        self.action.args.associated_calibrators = associated
+        self.action.args.associated_calibrators.sort('catflux')
+
+        magdiffs = associated['mag'] - associated['instmag']
+        mean, med, std = stats.sigma_clipped_stats(magdiffs)
+        self.action.args.zero_point = med
+        self.action.args.zero_point_f0 = 10**(self.action.args.zero_point/2.5)
+        self.action.args.throughput = self.action.args.zero_point_f0/self.action.args.f0
+        self.log.info(f'  Zero Point = {self.action.args.zero_point:.2f}')
+        self.log.debug(f'  Zero Point F0 = {self.action.args.zero_point_f0:.3g}')
+        self.log.debug(f'  Estimated F0 = {self.action.args.f0:.3g}')
+        self.log.info(f'  Througput = {self.action.args.throughput:.3f}')
 
         return self.action.args
 
@@ -364,7 +379,7 @@ class AssociateTargetStars(BasePrimitive):
         assoc_radius = self.cfg['Photometry'].getfloat('accoc_radius', 1)\
                        * self.action.args.fwhm*u.pix\
                        * pixel_scale
-        associated = Table(names=('RA', 'DEC', 'x', 'y', 'assoc_distance', 'mag', 'catflux', 'flux', 'flux2', 'instmag', 'FWHM'),
+        associated = Table(names=('RA', 'DEC', 'x', 'y', 'assoc_distance', 'mag', 'catflux', 'flux', 'apflux', 'instmag', 'FWHM'),
                            dtype=('f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8', 'f8') )
 
         catalog_coords = c.SkyCoord(self.action.args.target_catalog['RA'],
@@ -390,10 +405,10 @@ class AssociateTargetStars(BasePrimitive):
                                      'y': detected['y'],
                                      'assoc_distance': d2d[0].to(u.arcsec).value, 
                                      'mag': self.action.args.target_catalog[idx]['mag'],
-                                     'catflux': self.action.args.f0 * 10**(-self.action.args.target_catalog[idx]['mag']/2.512), # phot/sec
+                                     'catflux': self.action.args.f0 * 10**(-self.action.args.target_catalog[idx]['mag']/2.5), # phot/sec
                                      'flux': detected['flux'],
-                                     'instmag': -2.512*np.log(detected['flux']),
-                                     'flux2': detected['flux2'],
+                                     'instmag': -2.5*np.log10(detected['apflux']),
+                                     'apflux': detected['apflux'],
                                      'FWHM': detected['FWHM'],
                                      } )
         if len(associated) < 2:
@@ -406,13 +421,16 @@ class AssociateTargetStars(BasePrimitive):
 
 #         nclip = int(np.floor(0.05*len(associated['catflux'])))
 #         fitted_line = sigma_clipping_line_fit(associated['catflux'][nclip:-nclip],
-#                                               associated['flux2'][nclip:-nclip],
+#                                               associated['apflux'][nclip:-nclip],
 #                                               intercept_fixed=True)
 #         self.log.info(f"  Slope (e-/photon) = {fitted_line.slope.value:.3g}")
 #         self.action.args.zero_point_fit = fitted_line
-#         deltas = associated['flux2'] - fitted_line(associated['catflux'])
+#         deltas = associated['apflux'] - fitted_line(associated['catflux'])
 #         mean, med, std = stats.sigma_clipped_stats(deltas)
 #         self.log.info(f"  Fit StdDev = {std:.2g}")
 
         return self.action.args
 
+
+if __name__ == '__main__':
+    pass

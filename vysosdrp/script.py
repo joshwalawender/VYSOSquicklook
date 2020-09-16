@@ -18,9 +18,15 @@ from glob import glob
 from vysosdrp.pipelines import QuickLookPipeline
 
 
+##-----------------------------------------------------------------------------
+## Parse Arguments
+##-----------------------------------------------------------------------------
 def _parseArguments(in_args):
     parser = argparse.ArgumentParser(prog=f"{in_args[0]}",
                       description='')
+    parser.add_argument("-v", "--verbose", dest="verbose",
+           default=False, action="store_true",
+           help="Be verbose.")
     parser.add_argument('-c', dest="config_file", type=str,
            help="Configuration file")
     parser.add_argument("--cals", dest="cals",
@@ -42,6 +48,9 @@ def _parseArguments(in_args):
     return args
 
 
+##-----------------------------------------------------------------------------
+## Setup Framework
+##-----------------------------------------------------------------------------
 def setup_framework(args, pipeline=QuickLookPipeline):
     # START HANDLING OF CONFIGURATION FILES ##########
     pkg = 'vysosdrp'
@@ -84,6 +93,9 @@ def setup_framework(args, pipeline=QuickLookPipeline):
     return framework
 
 
+##-----------------------------------------------------------------------------
+## Analyze One File
+##-----------------------------------------------------------------------------
 def analyze_one():
     args = _parseArguments(sys.argv)
     p = Path(args.input).expanduser().absolute()
@@ -111,10 +123,12 @@ def analyze_one():
     queue.put(event)
 
 
+##-----------------------------------------------------------------------------
+## Watch Directory
+##-----------------------------------------------------------------------------
 def watch_directory():
     args = _parseArguments(sys.argv)
     framework = setup_framework(args, pipeline=QuickLookPipeline)
-    # Remove existing data set
 
     if args.input is not '':
         p = Path(args.input).expanduser()
@@ -134,8 +148,6 @@ def watch_directory():
             elif p.is_dir() is True:
                 framework.context.pipeline_logger.info(f'Found directory: {args.input}')
     else:
-#         date_string = datetime.utcnow().strftime('%Y%m%dUT')
-#         p = Path(f'~/V20Data/Images/{date_string}').expanduser()
         p = Path(f'~/V20Data/Images').expanduser()
         if p.exists() is False:
             p.mkdir(parents=True, exist_ok=True)
@@ -147,10 +159,13 @@ def watch_directory():
     framework.start(False, False, False, True)
 
 
+##-----------------------------------------------------------------------------
+## Change Watched Directory
+##-----------------------------------------------------------------------------
 def change_directory():
     args = _parseArguments(sys.argv)
     if args.input is not '':
-        newdir = Path(args.input).expanduser()
+        newdir = Path(args.input).expanduser().absolute()
     else:
         date_string = datetime.utcnow().strftime('%Y%m%dUT')
         newdir = Path(f'~/V20Data/Images/{date_string}').expanduser()
@@ -168,12 +183,56 @@ def change_directory():
     queue = queues.get_event_queue(cfg.queue_manager_hostname,
                                    cfg.queue_manager_portnr,
                                    cfg.queue_manager_auth_code)
+
     if queue is None:
         print("Failed to connect to Queue Manager")
     else:
         pending = queue.get_pending()
+        event = Event("set_file_type", args)
+        queue.put(event)
         event = Event("update_directory", args)
         queue.put(event)
+
+
+##-----------------------------------------------------------------------------
+## List Queue
+##-----------------------------------------------------------------------------
+def list_queue():
+    args = _parseArguments(sys.argv)
+    framework_config_fullpath = pkg_resources.resource_filename("vysosdrp", "framework.cfg")
+    cfg = ConfigClass(framework_config_fullpath)
+    drpif = FrameworkInterface(cfg)
+    # Print pending Events
+    if drpif.is_queue_ok():
+        events = drpif.pending_events()
+        print(f'Found {len(events)} in queue')
+        if args.verbose is True:
+            for event in events:
+                print(event)
+    else:
+        print ("Pending events: Queue not available", drpif.queue)
+
+
+##-----------------------------------------------------------------------------
+## Clear Queue
+##-----------------------------------------------------------------------------
+def clear_queue():
+    args = _parseArguments(sys.argv)
+    framework_config_fullpath = pkg_resources.resource_filename("vysosdrp", "framework.cfg")
+    cfg = ConfigClass(framework_config_fullpath)
+    drpif = FrameworkInterface(cfg)
+    # Print pending Events
+    if drpif.is_queue_ok():
+        events = drpif.pending_events()
+        print(f'Found {len(events)} in queue')
+    else:
+        print ("Pending events: Queue not available", drpif.queue)
+
+    if drpif.is_queue_ok():
+        drpif.stop_event_queue()
+        print ("Queue manager stopped")
+    else:
+        print ("Queue manager already stopped")
 
 
 if __name__ == "__main__":

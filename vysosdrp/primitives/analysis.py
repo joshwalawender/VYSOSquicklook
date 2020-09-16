@@ -14,7 +14,6 @@ from astropy.time import Time
 import astropy.coordinates as c
 from astropy.wcs import WCS
 from astropy.table import Table, Column, MaskedColumn
-from astropy.modeling import models, fitting
 import ccdproc
 import photutils
 
@@ -23,141 +22,7 @@ from keckdata import fits_reader, VYSOS20
 from keckdrpframework.primitives.base_primitive import BasePrimitive
 from keckdrpframework.models.arguments import Arguments
 
-from .utils import pre_condition, post_condition
-
-
-##-----------------------------------------------------------------------------
-## Function: download_vizier
-##-----------------------------------------------------------------------------
-def download_vizier(pointing, radius, catalog='UCAC4', band='i', maglimit=None):
-    from astroquery.vizier import Vizier
-    catalogs = {'UCAC4': 'I/322A', 'Gaia': 'I/345/gaia2'}
-    if catalog not in catalogs.keys():
-        print(f'{catalog} not in {catalogs.keys()}')
-        raise NotImplementedError
-    if band not in ['r', 'i']:
-        print(f'Band {band} not supported')
-        raise NotImplementedError
-
-    columns = {'UCAC4': ['_RAJ2000', '_DEJ2000', 'rmag', 'imag'],
-               'Gaia': ['RA_ICRS', 'DE_ICRS', 'Gmag', 'RPmag']}
-    ra_colname = {'UCAC4': '_RAJ2000',
-                  'Gaia': 'RA_ICRS'}
-    dec_colname = {'UCAC4': '_DEJ2000',
-                   'Gaia': 'DE_ICRS'}
-    mag_colname = {'UCAC4': f'{band}mag',
-                   'Gaia': 'RPmag'}
-    filter_string = '>0' if maglimit is None else f"<{maglimit}"
-    column_filter = {mag_colname[catalog]: filter_string}
-
-    v = Vizier(columns=columns[catalog],
-               column_filters=column_filter)
-    v.ROW_LIMIT = 2e4
-
-    try:
-        stars = Table(v.query_region(pointing, catalog=catalogs[catalog],
-                                     radius=c.Angle(radius, "deg"))[0])
-        stars.add_column( Column(data=stars[ra_colname[catalog]], name='RA') )
-        stars.add_column( Column(data=stars[dec_colname[catalog]], name='DEC') )
-        stars.add_column( Column(data=stars[mag_colname[catalog]], name='mag') )
-    except:
-        stars = None
-    return stars
-
-
-##-----------------------------------------------------------------------------
-## Function: get_panstarrs
-##-----------------------------------------------------------------------------
-def get_panstarrs(cfg, field_name, pointing, filter, maglimit=None, log=None):
-    catalogname = cfg['Photometry'].get('calibration_catalog')
-    band = {'PSi': 'i', 'PSr': 'r'}[filter]
-
-    ## First check if we have a pre-downloaded catalog for this field
-    local_catalog_path = Path(cfg['Photometry'].get('local_catalog_path', '.'))
-    local_catalog_file = local_catalog_path.joinpath(f'{field_name}.cat')
-    if local_catalog_file.exists() is True:
-        ## Read local file
-        if log: log.debug(f'  Reading {local_catalog_file}')
-        pscat = Table.read(local_catalog_file, format='ascii.csv')
-    else:
-        ## Download
-        if log: log.debug(f'  Downloading from Mast')
-        radius = 0.35 # Allow for some telescope pointing error
-        from astroquery.mast import Catalogs
-        pscat = Catalogs.query_region(pointing, radius=radius, catalog="Panstarrs")
-        if log: log.debug(f'  Got {len(pscat)} entries total')
-        pscat = pscat[pscat[f'{band}MeanApMag'].mask == False]
-        if log: log.debug(f'  Got {len(pscat)} entries with {band}-band magnitudes')
-        if log: log.debug(f'  Writing {local_catalog_file}')
-        pscat.write(local_catalog_file, format='ascii.csv')
-
-    # Filter based on magnitude
-    if maglimit is not None:
-        pscat = pscat[pscat[f'{band}MeanApMag'] <= maglimit]
-
-    return pscat
-
-
-##-----------------------------------------------------------------------------
-## Function: sigma_clipping_line_fit
-##-----------------------------------------------------------------------------
-def sigma_clipping_line_fit(xdata, ydata, nsigma=5, maxiter=3, maxcleanfrac=0.2,
-                            intercept_fixed=False, intercept0=0, slope0=1):
-        npoints = len(xdata)
-        fit = fitting.LinearLSQFitter()
-        line_init = models.Linear1D(slope=slope0, intercept=intercept0)
-        line_init.intercept.fixed = intercept_fixed
-        fitted_line = fit(line_init, xdata, ydata)
-        deltas = ydata - fitted_line(xdata)
-        mean, median, std = stats.sigma_clipped_stats(deltas)
-        cleaned = np.array(abs(deltas) < nsigma*std)
-        for iteration in range(1, maxiter):
-            last_std = std
-            cleaned = cleaned | np.array(abs(deltas) < nsigma*std)
-            if np.sum(cleaned)/npoints > maxcleanfrac:
-                return fitted_line
-            new_fit = fit(line_init, xdata[cleaned], ydata[cleaned])
-            deltas = ydata - new_fit(xdata)
-            mean, median, std = stats.sigma_clipped_stats(deltas)
-            if std >= last_std:
-                return new_fit
-            else:
-                fitted_line = new_fit
-
-        return fitted_line
-
-
-##-----------------------------------------------------------------------------
-## Function: estimate_f0
-##-----------------------------------------------------------------------------
-def estimate_f0(A, band='i'):
-    '''
-    1 Jy = 1.51e7 photons sec^-1 m^-2 (dlambda/lambda)^-1
-    https://archive.is/20121204144725/http://www.astro.utoronto.ca/~patton/astro/mags.html#selection-587.2-587.19
-    band cent    dl/l    Flux0   Reference
-    U    0.36    0.15    1810    Bessel (1979)
-    B    0.44    0.22    4260    Bessel (1979)
-    V    0.55    0.16    3640    Bessel (1979)
-    R    0.64    0.23    3080    Bessel (1979)
-    I    0.79    0.19    2550    Bessel (1979)
-    J    1.26    0.16    1600    Campins, Reike, & Lebovsky (1985)
-    H    1.60    0.23    1080    Campins, Reike, & Lebovsky (1985)
-    K    2.22    0.23    670     Campins, Reike, & Lebovsky (1985)
-    g    0.52    0.14    3730    Schneider, Gunn, & Hoessel (1983)
-    r    0.67    0.14    4490    Schneider, Gunn, & Hoessel (1983)
-    i    0.79    0.16    4760    Schneider, Gunn, & Hoessel (1983)
-    z    0.91    0.13    4810    Schneider, Gunn, & Hoessel (1983)
-    '''
-    tabledata = {'band': ['U', 'B', 'V', 'R', 'I', 'J', 'H', 'K', 'g', 'r', 'i', 'z'],
-                 'cent': [0.36, 0.44, 0.55, 0.64, 0.79, 1.26, 1.60, 2.22, 0.52, 0.67, 0.79, 0.91],
-                 'dl/l': [0.15, 0.22, 0.16, 0.23, 0.19, 0.16, 0.23, 0.23, 0.14, 0.14, 0.16, 0.13],
-                 'Flux0': [1810, 4260, 3640, 3080, 2550, 1600, 1080, 670 , 3730, 4490, 4760, 4810],
-                }
-    t = Table(tabledata)
-    band = t[t['band'] == band]
-    dl = 0.16 # dl/l (for i band)
-    f0 = band['Flux0'] * 1.51e7 * A * band['dl/l'] # photons / sec
-    return f0[0]
+from .utils import pre_condition, post_condition, download_vizier, get_panstarrs, sigma_clipping_line_fit, estimate_f0
 
 
 ##-----------------------------------------------------------------------------
@@ -292,7 +157,22 @@ class SolveAstrometry(BasePrimitive):
                ]
         if self.cfg['Astrometry'].get('astrometry_cfg_file', None) is not None:
             cmd.extend(['-b', self.cfg['Astrometry'].get('astrometry_cfg_file')])
-        cmd.append(f'{self.action.args.fitsfilepath}')
+
+        if self.action.args.fitsfilepath.suffix == '.fz':
+            self.log.info(f'  Uncompressing {self.action.args.fitsfilepath.name}')
+            tmpfile = Path('~/tmp.fts').expanduser().absolute()
+            if tmpfile.exists():
+                self.log.debug(f'  Removing old {tmpfile}')
+                tmpfile.unlink()
+            funpackcmd = ['funpack', '-O', f'{tmpfile}',
+                          f'{self.action.args.fitsfilepath}']
+            self.log.debug(f'  funpack command: {funpackcmd}')
+            funpack_result = subprocess.run(funpackcmd,
+                                            stdout=subprocess.PIPE,
+                                            stderr=subprocess.PIPE)
+            cmd.append(f'{tmpfile}')
+        else:
+            cmd.append(f'{self.action.args.fitsfilepath}')
 
         self.log.debug(f"  Solve astrometry command: {' '.join(cmd)}")
 
@@ -489,19 +369,68 @@ class GetCalibrationStars(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
 
-        pscat = get_panstarrs(self.cfg,
-                              self.action.args.kd.get('OBJECT'),
-                              self.action.args.header_pointing.to_string('decimal'),
-                              self.action.args.kd.filter(),
-                              maglimit=self.cfg['Photometry'].getfloat('calibration_maglimit', 25),
-                              log=self.log,
-                              )
+        try:
+            pscat = get_panstarrs(self.cfg,
+                                  self.action.args.kd.get('OBJECT'),
+                                  self.action.args.header_pointing.to_string('decimal'),
+                                  self.action.args.kd.filter(),
+                                  maglimit=self.cfg['Photometry'].getfloat('calibration_maglimit', 25),
+                                  log=self.log,
+                                  )
+        except Exception as e:
+            self.log.debug(e)
+            pscat = None
 
         self.action.args.calibration_catalog = pscat
         ncat = len(self.action.args.calibration_catalog) if self.action.args.calibration_catalog is not None else 0
         self.log.info(f"  Found {ncat} catalog entries for calibration")
 
         return self.action.args
+
+
+##-----------------------------------------------------------------------------
+## Primitive: CalibratePhotometry
+##-----------------------------------------------------------------------------
+# class CalibratePhotometry(BasePrimitive):
+#     """
+#     This is a template for primitives, which is usually an action.
+# 
+#     The methods in the base class can be overloaded:
+#     - _pre_condition
+#     - _post_condition
+#     - _perform
+#     - apply
+#     - __call__
+#     """
+# 
+#     def __init__(self, action, context):
+#         BasePrimitive.__init__(self, action, context)
+#         self.log = context.pipeline_logger
+#         self.cfg = self.context.config.instrument
+# 
+#     def _pre_condition(self):
+#         """Check for conditions necessary to run this process"""
+#         checks = [pre_condition(self, 'Skip image is not set',
+#                                 not self.action.args.skip),
+#                   pre_condition(self, 'Calibration catalog exists',
+#                                 self.action.args.calibration_catalog is not None),
+#                   pre_condition(self, 'Calibration catalog has been associated',
+#                                 self.action.args.associated_calibrators is not None),
+#                  ]
+#         return np.all(checks)
+# 
+#     def _post_condition(self):
+#         """Check for conditions necessary to verify that the process run correctly"""
+#         checks = []
+#         return np.all(checks)
+# 
+#     def _perform(self):
+#         """
+#         Returns an Argument() with the parameters that depends on this operation.
+#         """
+#         self.log.info(f"Running {self.__class__.__name__} action")
+#         nx, ny = self.action.args.kd.pixeldata[0].shape
+
 
 
 ##-----------------------------------------------------------------------------
@@ -636,7 +565,7 @@ class CalibratePhotometry(BasePrimitive):
         A = 3.14*(d_telescope/2/1000)**2 - 3.14*(d_obstruction/2/1000)**2 # m^2
         self.action.args.f0 = estimate_f0(A, band=self.action.args.band) # photons / sec
         catflux = self.action.args.f0\
-                  * 10**(-self.action.args.calibration_catalog[f'{self.action.args.band}MeanApMag']/2.512)
+                  * 10**(-self.action.args.calibration_catalog[f'{self.action.args.band}MeanApMag']/2.5)
         self.action.args.calibration_catalog.add_column(Column(data=catflux*u.photon/u.second,
                                                                name='catflux'))
 
@@ -755,4 +684,8 @@ class ImageStats(BasePrimitive):
 
         self.action.args.image_stats = (stats.sigma_clipped_stats(self.action.args.kd.pixeldata[0]))
         return self.action.args
+
+
+if __name__ == '__main__':
+    pass
 

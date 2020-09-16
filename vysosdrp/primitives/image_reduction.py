@@ -58,12 +58,12 @@ class ReadFITS(BasePrimitive):
         self.action.args.wcs_pointing = None
         self.action.args.perr = np.nan
         self.action.args.wcs = None
-        self.action.args.catalog = None
+        self.action.args.calibration_catalog = None
         self.action.args.target_catalog = None
         self.action.args.fwhm = None
         self.action.args.ellipticity = None
         self.action.args.zero_point = None
-        self.action.args.associated = None
+        self.action.args.associated_calibrators = None
         self.action.args.measured = None
         self.action.args.zero_point_fit = None
         self.action.args.f0 = None
@@ -449,7 +449,7 @@ class CreateBackground(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
         box_size = self.cfg['Extract'].getint('background_box_size', 128)
-
+        self.log.debug(f"  Using box size = {box_size} pixels")
         self.action.args.background = [None] * len(self.action.args.kd.pixeldata)
         for i,pd in enumerate(self.action.args.kd.pixeldata):
             bkg = photutils.Background2D(pd, box_size=box_size,
@@ -650,3 +650,5 @@ class StackDarks(BasePrimitive):
         return self.action.args
 
 
+if __name__ == '__main__':
+    pass

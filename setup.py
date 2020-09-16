@@ -32,6 +32,8 @@ entry_points = {
         "analyzeone = vysosdrp.script:analyze_one",
         "watchdirectory = vysosdrp.script:watch_directory",
         "qlcd = vysosdrp.script:change_directory",
+        "qlclear = vysosdrp.script:clear_queue",
+        "listqueue = vysosdrp.script:list_queue",
     ]
 }
 
