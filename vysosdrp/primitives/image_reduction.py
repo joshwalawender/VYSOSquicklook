@@ -219,7 +219,9 @@ class BiasSubtract(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        checks = [pre_condition(self, 'master bias is available',
+        checks = [pre_condition(self, 'Skip image is not set',
+                                not self.action.args.skip),
+                  pre_condition(self, 'master bias is available',
                                 self.master_bias is not None),
                  ]
         return np.all(checks)
@@ -267,7 +269,9 @@ class DarkSubtract(BasePrimitive):
 
     def _pre_condition(self):
         """Check for conditions necessary to run this process"""
-        checks = [pre_condition(self, 'master dark is available',
+        checks = [pre_condition(self, 'Skip image is not set',
+                                not self.action.args.skip),
+                  pre_condition(self, 'master dark is available',
                                 self.master_dark is not None),
                  ]
         return np.all(checks)
