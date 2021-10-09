@@ -148,7 +148,7 @@ def watch_directory():
             elif p.is_dir() is True:
                 framework.context.pipeline_logger.info(f'Found directory: {args.input}')
     else:
-        p = Path(f'~/V20Data/Images').expanduser()
+        p = Path(f'~/V5Data/Images').expanduser()
         if p.exists() is False:
             p.mkdir(parents=True, exist_ok=True)
         args.input = str(p)

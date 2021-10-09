@@ -145,7 +145,7 @@ class SolveAstrometry(BasePrimitive):
         cmd = [f'{solve_field}', '-p', '-O', '-N', 'none', '-B', 'none',
                '-U', 'none', '-S', 'none', '-M', 'none', '-R', 'none',
                '--axy', f'{axy_output_file}', '-W', f'{wcs_output_file}',
-               '-z', '2',
+               '-z', '4',
                '-L', f'{0.9*estimated_pixel_scale}',
                '-H', f'{1.1*estimated_pixel_scale}',
                '-u', 'arcsecperpix',

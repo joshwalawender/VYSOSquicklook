@@ -309,7 +309,8 @@ class RenderJPEG(BasePrimitive):
 
         jpeg_axes.set_title(titlestr)
         reportfilename = f'{self.action.args.fitsfile.split(".")[0]}.jpg'
-        self.action.args.jpegfile = Path('/var/www/plots/V20/') / reportfilename
+        instrument = self.action.args.kd.instrument
+        self.action.args.jpegfile = Path('/var/www/plots/') / instrument / reportfilename
         plt.savefig(self.action.args.jpegfile, dpi=dpi)
 
 

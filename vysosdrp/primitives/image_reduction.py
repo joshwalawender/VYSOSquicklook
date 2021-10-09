@@ -18,7 +18,7 @@ import ccdproc
 import photutils
 import sep
 
-from keckdata import fits_reader, VYSOS20
+from keckdata import fits_reader, VYSOS20, VYSOS5
 
 from keckdrpframework.primitives.base_primitive import BasePrimitive
 from keckdrpframework.models.arguments import Arguments
@@ -116,8 +116,15 @@ class ReadFITS(BasePrimitive):
 
         # Read FITS file
         self.log.info(f'  Reading: {self.action.args.fitsfile}')
-        self.action.args.kd = fits_reader(self.action.args.fitsfilepath,
-                                          datatype=VYSOS20)
+
+        if self.action.args.fitsfile[:3] == 'V20':
+            self.log.info('  Opening file as V20 data')
+            self.action.args.kd = fits_reader(self.action.args.fitsfilepath,
+                                              datatype=VYSOS20)
+        elif self.action.args.fitsfile[:2] == 'V5':
+            self.log.info('  Opening file as V5 data')
+            self.action.args.kd = fits_reader(self.action.args.fitsfilepath,
+                                              datatype=VYSOS5)
 
         return self.action.args
 
@@ -237,7 +244,8 @@ class BiasSubtract(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
         self.log.info(f"  Found master bias file: {self.master_bias.name}")
-        kd_master_bias = fits_reader(self.master_bias, datatype=VYSOS20)
+        datatype = type(self.action.args.kd)
+        kd_master_bias = fits_reader(self.master_bias, datatype=datatype)
 
         self.action.args.kd.pixeldata[0] = ccdproc.subtract_bias(
             self.action.args.kd.pixeldata[0], kd_master_bias.pixeldata[0])
@@ -287,7 +295,8 @@ class DarkSubtract(BasePrimitive):
         """
         self.log.info(f"Running {self.__class__.__name__} action")
         self.log.info(f"  Found master dark file: {self.master_dark.name}")
-        kd_master_dark = fits_reader(self.master_dark, datatype=VYSOS20)
+        datatype = type(self.action.args.kd)
+        kd_master_dark = fits_reader(self.master_dark, datatype=datatype)
 
         self.action.args.kd.pixeldata[0] = ccdproc.subtract_dark(
             self.action.args.kd.pixeldata[0], kd_master_dark.pixeldata[0],
