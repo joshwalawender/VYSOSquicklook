@@ -148,7 +148,9 @@ def watch_directory():
             elif p.is_dir() is True:
                 framework.context.pipeline_logger.info(f'Found directory: {args.input}')
     else:
-        p = Path(f'~/V5Data/Images').expanduser()
+        path_str = framework.config.instrument.get('Telescope', 'data_path')
+        framework.logger.info(f'Setting data path: {path_str}')
+        p = Path(path_str).expanduser()
         if p.exists() is False:
             p.mkdir(parents=True, exist_ok=True)
         args.input = str(p)
@@ -168,11 +170,15 @@ def change_directory():
         newdir = Path(args.input).expanduser().absolute()
     else:
         date_string = datetime.utcnow().strftime('%Y%m%dUT')
-        newdir = Path(f'~/V20Data/Images/{date_string}').expanduser()
+        data_path = framework.config.instrument.get('Telescope', 'data_path')
+#         newdir = Path(f'~/V20Data/Images/{date_string}').expanduser()
+        newdir = Path(data_path).expanduser() / date_string
         if args.cals is True:
-            newdir = Path(f'~/V20Data/Images/{date_string}/Calibration').expanduser()
+#             newdir = Path(f'~/V20Data/Images/{date_string}/Calibration').expanduser()
+            newdir = Path(data_path).expanduser() / date_string / 'Calibration'
         if args.flats is True:
-            newdir = Path(f'~/V20Data/Images/{date_string}/AutoFlat').expanduser()
+#             newdir = Path(f'~/V20Data/Images/{date_string}/AutoFlat').expanduser()
+            newdir = Path(data_path).expanduser() / date_string / 'AutoFlat'
 
     args.input = str(newdir)
     if newdir.exists() is False:

@@ -335,6 +335,7 @@ class Record(BasePrimitive):
             'telescope': self.action.args.kd.instrument,
             'compressed': Path(self.action.args.kd.fitsfilename).suffix == '.fz',
             }
+        self.log.info(self.image_info)
         # From Header
         if self.action.args.kd.get('OBJECT', None) is not None:
             self.image_info['target name'] = self.action.args.kd.get('OBJECT')
