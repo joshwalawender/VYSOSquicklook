@@ -154,7 +154,8 @@ def download_vizier(pointing, radius, catalog='UCAC4', band='i', maglimit=None):
 ##-----------------------------------------------------------------------------
 ## Function: get_panstarrs
 ##-----------------------------------------------------------------------------
-def get_panstarrs(cfg, field_name, pointing, filter, maglimit=None, log=None):
+def get_panstarrs(cfg, field_name, pointing, filter, radius=0.35,
+                  maglimit=None, log=None):
     catalogname = cfg['Photometry'].get('calibration_catalog')
     band = {'PSi': 'i', 'PSr': 'r'}[filter]
     if maglimit is None: maglimit = 25
@@ -169,37 +170,54 @@ def get_panstarrs(cfg, field_name, pointing, filter, maglimit=None, log=None):
     else:
         ## Download
         if log: log.debug(f'  Downloading from Mast')
-        radius = 0.35 # Allow for some telescope pointing error
         from astroquery.mast import Catalogs
-        cols = ['objName', 'objID', 'objInfoFlag', 'qualityFlag', 'raMean',
-                'decMean', 'raMeanErr', 'decMeanErr', 'epochMean', 'nDetections',
-                'ng', 'nr', 'ni', 'gMeanApMag', 'gMeanApMagErr', 'gMeanApMagStd',
+#         cols = ['objName', 'objID', 'objInfoFlag', 'qualityFlag', 'raMean',
+#                 'decMean', 'raMeanErr', 'decMeanErr', 'epochMean', 'nDetections',
+#                 'ng', 'nr', 'ni', 'gMeanApMag', 'gMeanApMagErr', 'gMeanApMagStd',
+#                 'gMeanApMagNpt', 'gFlags', 'rMeanApMag', 'rMeanApMagErr',
+#                 'rMeanApMagStd', 'rMeanApMagNpt', 'rFlags', 'iMeanApMag',
+#                 'iMeanApMagErr', 'iMeanApMagStd', 'iMeanApMagNpt', 'iFlags']
+        cols = ['objName', 'objID', 'raMean', 'decMean', 'raMeanErr', 'decMeanErr',
+                'gMeanApMag', 'gMeanApMagErr', 'gMeanApMagStd',
                 'gMeanApMagNpt', 'gFlags', 'rMeanApMag', 'rMeanApMagErr',
                 'rMeanApMagStd', 'rMeanApMagNpt', 'rFlags', 'iMeanApMag',
                 'iMeanApMagErr', 'iMeanApMagStd', 'iMeanApMagNpt', 'iFlags']
-        if band == 'i':
+
+        if band in ['i', 'r', 'g']:
             pscat = Catalogs.query_region(pointing, radius=radius,
                              catalog="Panstarrs", table="mean", data_release="dr2",
                              sort_by=[("desc", f"{band}MeanApMag")], columns=cols,
                              iMeanApMag=[("gte", 0), ("lte", maglimit)],
-                             )
-        elif band == 'r':
-            pscat = Catalogs.query_region(pointing, radius=radius,
-                             catalog="Panstarrs", table="mean", data_release="dr2",
-                             sort_by=[("desc", f"{band}MeanApMag")], columns=cols,
-                             rMeanApMag=[("gte", 0), ("lte", maglimit)],
-                             )
-        elif band == 'g':
-            pscat = Catalogs.query_region(pointing, radius=radius,
-                             catalog="Panstarrs", table="mean", data_release="dr2",
-                             sort_by=[("desc", f"{band}MeanApMag")], columns=cols,
-                             gMeanApMag=[("gte", 0), ("lte", maglimit)],
                              )
         else:
             pscat = Catalogs.query_region(pointing, radius=radius,
                              catalog="Panstarrs", table="mean", data_release="dr2",
                              columns=cols,
                              )
+
+#         if band == 'i':
+#             pscat = Catalogs.query_region(pointing, radius=radius,
+#                              catalog="Panstarrs", table="mean", data_release="dr2",
+#                              sort_by=[("desc", f"{band}MeanApMag")], columns=cols,
+#                              iMeanApMag=[("gte", 0), ("lte", maglimit)],
+#                              )
+#         elif band == 'r':
+#             pscat = Catalogs.query_region(pointing, radius=radius,
+#                              catalog="Panstarrs", table="mean", data_release="dr2",
+#                              sort_by=[("desc", f"{band}MeanApMag")], columns=cols,
+#                              rMeanApMag=[("gte", 0), ("lte", maglimit)],
+#                              )
+#         elif band == 'g':
+#             pscat = Catalogs.query_region(pointing, radius=radius,
+#                              catalog="Panstarrs", table="mean", data_release="dr2",
+#                              sort_by=[("desc", f"{band}MeanApMag")], columns=cols,
+#                              gMeanApMag=[("gte", 0), ("lte", maglimit)],
+#                              )
+#         else:
+#             pscat = Catalogs.query_region(pointing, radius=radius,
+#                              catalog="Panstarrs", table="mean", data_release="dr2",
+#                              columns=cols,
+#                              )
         if log: log.debug(f'  Got {len(pscat)} entries total')
         if log: log.debug(f'  Got {len(pscat)} entries with {band}-band magnitudes')
         if log: log.debug(f'  Writing {local_catalog_file}')
@@ -285,6 +303,23 @@ def estimate_f0(A, band='i'):
     dl = 0.16 # dl/l (for i band)
     f0 = band['Flux0'] * 1.51e7 * A * band['dl/l'] # photons / sec
     return f0[0]
+
+
+##-----------------------------------------------------------------------------
+## Function: mode
+##-----------------------------------------------------------------------------
+def mode(data):
+    '''
+    Return mode of image.  Assumes int values (ADU), so uses binsize of one.
+    '''
+    bmin = np.floor(min(data.ravel())) - 1./2.
+    bmax = np.ceil(max(data.ravel())) + 1./2.
+    bins = np.arange(bmin,bmax,1)
+    hist, bins = np.histogram(data.ravel(), bins=bins)
+    centers = (bins[:-1] + bins[1:]) / 2
+    w = np.argmax(hist)
+    mode = int(centers[w])
+    return mode
 
 
 ##-----------------------------------------------------------------------------
@@ -521,7 +556,7 @@ class SetFileType(BasePrimitive):
         self.log.info(f'  Data directory is: {self.action.args.input}')
         if '/Volumes/VYSOSData' in self.action.args.input:
             file_type = "*.fts.fz"
-        elif '/Users/vysosuser/V20Data/Images' in self.action.args.input:
+        elif '/Users/vysosuser/' in self.action.args.input:
             file_type = "*.fts"
 
         self.log.info(f'  Setting file type to "{file_type}"')

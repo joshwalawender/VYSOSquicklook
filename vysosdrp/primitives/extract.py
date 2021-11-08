@@ -21,8 +21,7 @@ import sep
 from keckdrpframework.primitives.base_primitive import BasePrimitive
 from keckdrpframework.models.arguments import Arguments
 
-from .utils import pre_condition, post_condition
-from .utils import pre_condition, post_condition, sigma_clipping_line_fit, estimate_f0
+from .utils import pre_condition, post_condition, sigma_clipping_line_fit, estimate_f0, mode
 
 
 ##-----------------------------------------------------------------------------
@@ -152,6 +151,9 @@ class ExtractStars(BasePrimitive):
         minarea = self.cfg['Extract'].getint('extract_minarea', 7)
         mina = self.cfg['Extract'].getfloat('fwhm_mina', 1)
         minb = self.cfg['Extract'].getfloat('fwhm_minb', 1)
+        faint_limit_pct = self.cfg['Extract'].getfloat('faint_limit_percentile', 0)
+        bright_limit_pct = self.cfg['Extract'].getfloat('bright_limit_percentile', 100)
+        radius_limit = self.cfg['Extract'].getfloat('radius_limit_pix', 4000)
 
         bsub = self.action.args.kd.pixeldata[0].data - self.action.args.background[0].background
         try:
@@ -178,9 +180,20 @@ class ExtractStars(BasePrimitive):
         ellipticities = t['a']/t['b']
         t.add_column(Column(data=ellipticities.data, name='ellipticity', dtype=np.float))
 
-        filtered = (t['a'] < mina) | (t['b'] < minb) | (t['flag'] > 0)
+        faint_limit = np.percentile(t['flux'], faint_limit_pct)
+        bright_limit = np.percentile(t['flux'], bright_limit_pct)
+        self.log.info(f'  Faintest {faint_limit_pct:.1f}% flux {faint_limit:f}')
+        self.log.info(f'  Brightest {bright_limit_pct:.1f}% flux {bright_limit:f}')
+
+        filtered = (t['a'] < mina) | (t['b'] < minb) | (t['flag'] > 0) | (t['flux'] > bright_limit) | (t['flux'] < faint_limit) | (t['r'] > radius_limit)
         self.log.debug(f'  Removing {np.sum(filtered):d}/{len(filtered):d}'\
                        f' extractions from FWHM calculation')
+        self.log.debug(f"    {np.sum( (t['a'] < mina) )} removed for fwhm_mina limit")
+        self.log.debug(f"    {np.sum( (t['b'] < minb) )} removed for fwhm_minb limit")
+        self.log.debug(f"    {np.sum( (t['flag'] > 0) )} removed for source extractor flags")
+        self.log.debug(f"    {np.sum( (t['flux'] < faint_limit) )} removed for faint limit")
+        self.log.debug(f"    {np.sum( (t['flux'] > bright_limit) )} removed for bright limit")
+
         self.action.args.n_objects = len(t[~filtered])
         self.log.info(f'  Found {self.action.args.n_objects:d} stars')
 
@@ -190,13 +203,20 @@ class ExtractStars(BasePrimitive):
 
         if self.action.args.n_objects == 0:
             self.log.warning('No stars found')
+            return self.action.args
         else:
             FWHM_pix = np.median(t['FWHM'][~filtered])
-            ellipticity = np.median(t['ellipticity'][~filtered])
+            FWHM_mode_bin = pixel_scale*0.25
+            FWHM_pix_mode = mode(t['FWHM'][~filtered]/FWHM_mode_bin)*FWHM_mode_bin
             self.log.info(f'  Median FWHM = {FWHM_pix:.1f} pix ({FWHM_pix*pixel_scale:.2f} arcsec)')
-            self.log.info(f'  ellipticity = {ellipticity:.2f}')
-            self.action.args.fwhm = FWHM_pix
-            self.action.args.ellipticity = ellipticity
+            self.log.info(f'  Mode FWHM = {FWHM_pix_mode:.1f} pix ({FWHM_pix_mode*pixel_scale:.2f} arcsec)')
+            ellipticity = np.median(t['ellipticity'][~filtered])
+            ellipticity_mode_bin = 0.05
+            ellipticity_mode = mode(t['ellipticity'][~filtered]/ellipticity_mode_bin)*ellipticity_mode_bin
+            self.log.info(f'  Median ellipticity = {ellipticity:.2f}')
+            self.log.info(f'  Mode ellipticity = {ellipticity_mode:.2f}')
+            self.action.args.fwhm = FWHM_pix_mode
+            self.action.args.ellipticity = ellipticity_mode
 
         ## Do photutils photometry measurement
         positions = [(det['x'], det['y']) for det in self.action.args.objects]

@@ -116,15 +116,22 @@ class ReadFITS(BasePrimitive):
 
         # Read FITS file
         self.log.info(f'  Reading: {self.action.args.fitsfile}')
-
+        hdr = fits.getheader(self.action.args.fitsfilepath)
+        self.log.debug(f"  TELESCOP = {hdr.get('TELESCOP', '')}")
+        self.log.debug(f"  INSTRUME = {hdr.get('INSTRUME', '')}")
         if self.action.args.fitsfile[:3] == 'V20':
             self.log.info('  Opening file as V20 data')
             self.action.args.kd = fits_reader(self.action.args.fitsfilepath,
                                               datatype=VYSOS20)
-        elif self.action.args.fitsfile[:2] == 'V5':
+        elif self.action.args.fitsfile[:2] == 'V5'\
+             or 'V5Data' in self.action.args.fitsfilepath.parts\
+             or hdr.get('TELESCOP', '') == 'VYSOS-5A'\
+             or hdr.get('INSTRUME', '') == 'VYSOS-5A':
             self.log.info('  Opening file as V5 data')
             self.action.args.kd = fits_reader(self.action.args.fitsfilepath,
                                               datatype=VYSOS5)
+#             self.log.info('  Cropping to inner 2k x 2k')
+#             self.action.args.kd.pixeldata[0] = self.action.args.kd.pixeldata[0][1024:3076,1024:3076]
 
         return self.action.args
 

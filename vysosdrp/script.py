@@ -62,7 +62,7 @@ def setup_framework(args, pipeline=QuickLookPipeline):
 
     # add PIPELINE specific config files
     if args.config_file is None:
-        pipeline_config_file = 'pipeline.cfg'
+        pipeline_config_file = 'pipeline_V5.cfg'
         pipeline_config_fullpath = pkg_resources.resource_filename(pkg, pipeline_config_file)
         pipeline_config = ConfigClass(pipeline_config_fullpath, default_section='DEFAULT')
     else:
@@ -170,15 +170,15 @@ def change_directory():
         newdir = Path(args.input).expanduser().absolute()
     else:
         date_string = datetime.utcnow().strftime('%Y%m%dUT')
-        data_path = framework.config.instrument.get('Telescope', 'data_path')
-#         newdir = Path(f'~/V20Data/Images/{date_string}').expanduser()
-        newdir = Path(data_path).expanduser() / date_string
+#         data_path = framework.config.instrument.get('Telescope', 'data_path')
+        newdir = Path(f'~/V5Data/Images/{date_string}').expanduser()
+#         newdir = Path(data_path).expanduser() / date_string
         if args.cals is True:
-#             newdir = Path(f'~/V20Data/Images/{date_string}/Calibration').expanduser()
-            newdir = Path(data_path).expanduser() / date_string / 'Calibration'
+            newdir = Path(f'~/V5Data/Images/{date_string}/Calibration').expanduser()
+#             newdir = Path(data_path).expanduser() / date_string / 'Calibration'
         if args.flats is True:
-#             newdir = Path(f'~/V20Data/Images/{date_string}/AutoFlat').expanduser()
-            newdir = Path(data_path).expanduser() / date_string / 'AutoFlat'
+            newdir = Path(f'~/V5Data/Images/{date_string}/AutoFlat').expanduser()
+#             newdir = Path(data_path).expanduser() / date_string / 'AutoFlat'
 
     args.input = str(newdir)
     if newdir.exists() is False:

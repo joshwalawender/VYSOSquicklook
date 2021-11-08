@@ -198,7 +198,8 @@ class SolveAstrometry(BasePrimitive):
         if wcs_output_file.exists() is True:
             self.log.debug(f"  Found {wcs_output_file}")
         else:
-            raise FileNotFoundError(f"Could not find {wcs_output_file}")
+            self.log.warning(f"Could not find {wcs_output_file}")
+            return self.action.args
         if axy_output_file.exists() is True:
             self.log.debug(f"  Found {axy_output_file}. Deleteing.")
             axy_output_file.unlink()
@@ -374,6 +375,7 @@ class GetCalibrationStars(BasePrimitive):
                                   self.action.args.kd.get('OBJECT'),
                                   self.action.args.header_pointing.to_string('decimal'),
                                   self.action.args.kd.filter(),
+                                  radius=self.cfg['Photometry'].getfloat('calibration_radius', 0.35),
                                   maglimit=self.cfg['Photometry'].getfloat('calibration_maglimit', 25),
                                   log=self.log,
                                   )
