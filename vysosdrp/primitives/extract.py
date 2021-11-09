@@ -156,15 +156,30 @@ class ExtractStars(BasePrimitive):
         radius_limit = self.cfg['Extract'].getfloat('radius_limit_pix', 4000)
 
         bsub = self.action.args.kd.pixeldata[0].data - self.action.args.background[0].background
-        try:
-            objects = sep.extract(bsub,
-                                  err=self.action.args.kd.pixeldata[0].uncertainty.array,
-                                  mask=self.action.args.kd.pixeldata[0].mask,
-                                  thresh=float(thresh), minarea=minarea)
-        except Exception as e:
-            self.log.error('Source extractor failed')
-            self.log.error(e)
-            return self.action.args
+        seperr = self.action.args.kd.pixeldata[0].uncertainty.array
+        sepmask = self.action.args.kd.pixeldata[0].mask
+
+        def run_sep(bsub, seperr, sepmask, thresh, minarea):
+            try:
+                objects = sep.extract(bsub, err=seperr, mask=sepmask,
+                                      thresh=float(thresh), minarea=minarea)
+                return objects
+            except Exception as e:
+                if str(e)[:27] == 'internal pixel buffer full:':
+                    return None
+                else:
+                    raise SEPError(str(e))
+
+        objects = None
+        while objects is None:
+            try:
+                self.log.info(f'Invoking SEP with threshold: {thresh}')
+                objects = run_sep(bsub, seperr, sepmask, thresh, minarea)
+                thresh += 9
+            except SEPError as e:
+                self.log.error('Source extractor failed:')
+                self.log.error(e)
+                return self.action.args
 
         t = Table(objects)
         t['flux'] /= exptime

@@ -363,12 +363,15 @@ class Record(BasePrimitive):
         Returns an Argument() with the parameters that depends on this operation.
         """
         self.log.info(f"Running {self.__class__.__name__} action")
-
+        self.action.args.end_time = datetime.now()
+        self.action.args.processing_time = (self.action.args.end_time - self.action.args.start_time).total_seconds()
+        self.log.info(f"  Processing time = {self.action.args.processing_time:.0f} s")
         # Comple image info to store
         self.image_info = {
             'filename': self.action.args.fitsfile,
             'telescope': self.action.args.kd.instrument,
             'compressed': Path(self.action.args.kd.fitsfilename).suffix == '.fz',
+            'processing time': self.action.args.processing_time,
             }
         self.log.info(self.image_info)
         # From Header

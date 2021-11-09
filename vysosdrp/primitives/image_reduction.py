@@ -105,6 +105,7 @@ class ReadFITS(BasePrimitive):
         Returns an Argument() with the parameters that depends on this operation.
         """
         self.log.info(f"Running {self.__class__.__name__} action")
+        self.action.args.start_time = datetime.now()
 
         if self.action.args.images is not None:
             already_processed = [d for d in self.action.args.images.find( {'filename': self.action.args.fitsfile} )]
