@@ -90,8 +90,8 @@ class RenderJPEG(BasePrimitive):
         fig = plt.figure(figsize=(2*sx, 1*sy), dpi=dpi)
 
         plotpos = [ [ [0.010, 0.010, 0.550, 0.965], [0.565, 0.775, 0.375, 0.200] ],
-                    [ None                        , [0.565, 0.520, 0.375, 0.200] ],
-                    [ None                        , [0.565, 0.010, 0.375, 0.470] ],
+                    [ None                        , [0.565, 0.550, 0.375, 0.200] ],
+                    [ None                        , [0.565, 0.010, 0.375, 0.500] ],
                   ]
 
         ##-------------------------------------------------------------------------
@@ -205,48 +205,97 @@ class RenderJPEG(BasePrimitive):
             pixel_axes.set_ylabel('N Pix')
             pixel_axes.set_ylim(0,max(npix)*1.2)
 
+
+        ##-------------------------------------------------------------------------
+        # Plot instrumental mags
+        if self.action.args.associated_calibrators is not None:
+            flux_axes = plt.axes(plotpos[0][1])
+            self.log.debug(f'  Generating plot of flux vs catalog magnitude')
+            flux_axes.plot(self.action.args.associated_calibrators['mag'],
+                           self.action.args.associated_calibrators['apflux'], 'bo',
+                           label='photutils', mec=None, alpha=0.6)
+            flux_axes.set_xlim(min(self.action.args.associated_calibrators['mag']),
+                               max(self.action.args.associated_calibrators['mag']))
+            flux_axes.set_yscale('log')
+            flux_axes.set_ylabel('Measured Flux (e-/s)')
+            plt.grid()
+            plt.legend(loc='best')
+            self.log.debug(f'  Done')
+
+
+        ##-------------------------------------------------------------------------
+        # Plot instrumental mag diffs
+        if self.action.args.associated_calibrators is not None\
+            and self.action.args.zero_point_f0 is not None:
+            diff_axes = plt.axes(plotpos[1][1])
+            self.log.debug(f'  Generating plot of flux residual')
+            deltamag = self.action.args.associated_calibrators['mag']\
+                       - self.action.args.associated_calibrators['instmag']
+            mean, med, std = stats.sigma_clipped_stats(deltamag)
+            xmin = min(self.action.args.associated_calibrators['mag'])
+            xmax = max(self.action.args.associated_calibrators['mag'])
+            diff_axes.plot(self.action.args.associated_calibrators['mag'],
+                           deltamag, 'bo',
+                           label=f'Individual Zero Points',
+                           mec=None, alpha=0.6)
+            zp = self.action.args.zero_point
+            label = f'Zero Point = {zp:.2f} (throughput={self.action.args.throughput:.3f})'
+            diff_axes.plot([xmin, xmax], [zp,zp], 'k-', mec=None, alpha=0.6,
+                           label=label)
+            diff_axes.plot([xmin, xmax], [zp+0.1,zp+0.1], 'r-', mec=None, alpha=0.6)
+            diff_axes.plot([xmin, xmax], [zp-0.1,zp-0.1], 'r-', mec=None, alpha=0.6,
+                           label=f"+/-0.1 magnitude error (StdDev={std:.2f})")
+            diff_axes.set_xlabel('Catalog Magnitude')
+            diff_axes.set_xlim(xmin, xmax)
+            diff_axes.set_ylabel('Catalog - Instrumental Mag')
+            diff_axes.set_ylim(np.percentile(deltamag, 1)-0.25, np.percentile(deltamag, 99)+0.25)
+            plt.legend(loc='best')
+            plt.grid()
+            self.log.debug(f'  Done')
+
+
         ##-------------------------------------------------------------------------
         # Plot histogram of FWHM
-        if self.action.args.objects is not None:
-            self.log.debug(f'  Generating histogram of FWHM values')
-            fwhm_axes = plt.axes(plotpos[0][1])
-            avg_fwhm = self.action.args.fwhm*pixel_scale
-            minfwhm = np.percentile(self.action.args.objects['FWHM'], 0.1)*pixel_scale
-            maxfwhm = np.percentile(self.action.args.objects['FWHM'], 90)*pixel_scale
-            fwhm_axes.set_title(f"FWHM = {avg_fwhm:.1f} arcsec")
-            nstars, bins, p = fwhm_axes.hist(self.action.args.objects['FWHM']*pixel_scale,
-                                             bins=np.arange(minfwhm,maxfwhm,0.25*pixel_scale),
-                                             color='b', alpha=0.5)
-            fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.5)
-            fwhm_axes.set_ylabel('N stars')
-            fwhm_axes.set_ylim(0,max(nstars)*1.2)
-            fwhm_axes.set_xlabel(f'FWHM (arcsec) [1 pix = {pixel_scale:.2f} arcsec]')
-        if self.action.args.associated_calibrators is not None:
-            nstars, bins, p = fwhm_axes.hist(self.action.args.associated_calibrators['FWHM']*pixel_scale,
-                                             bins=np.arange(minfwhm,maxfwhm,0.25*pixel_scale),
-                                             color='r', alpha=0.5)
-            fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.5)
-        self.log.debug(f'  Done')
+#         if self.action.args.objects is not None:
+#             self.log.debug(f'  Generating histogram of FWHM values')
+#             fwhm_axes = plt.axes(plotpos[0][1])
+#             avg_fwhm = self.action.args.fwhm*pixel_scale
+#             minfwhm = np.percentile(self.action.args.objects['FWHM'], 0.1)*pixel_scale
+#             maxfwhm = np.percentile(self.action.args.objects['FWHM'], 90)*pixel_scale
+#             fwhm_axes.set_title(f"FWHM = {avg_fwhm:.1f} arcsec")
+#             nstars, bins, p = fwhm_axes.hist(self.action.args.objects['FWHM']*pixel_scale,
+#                                              bins=np.arange(minfwhm,maxfwhm,0.25*pixel_scale),
+#                                              color='b', alpha=0.5)
+#             fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.5)
+#             fwhm_axes.set_ylabel('N stars')
+#             fwhm_axes.set_ylim(0,max(nstars)*1.2)
+#             fwhm_axes.set_xlabel(f'FWHM (arcsec) [1 pix = {pixel_scale:.2f} arcsec]')
+#         if self.action.args.associated_calibrators is not None:
+#             nstars, bins, p = fwhm_axes.hist(self.action.args.associated_calibrators['FWHM']*pixel_scale,
+#                                              bins=np.arange(minfwhm,maxfwhm,0.25*pixel_scale),
+#                                              color='r', alpha=0.5)
+#             fwhm_axes.plot([avg_fwhm, avg_fwhm], [0,max(nstars)*1.2], 'r-', alpha=0.5)
+#         self.log.debug(f'  Done')
 
         ##-------------------------------------------------------------------------
         # Plot histogram of ellipticity
-        if self.action.args.objects is not None:
-            self.log.debug(f'  Generating histogram of ellipticity values')
-            elip_axes = plt.axes(plotpos[1][1])
-            avg_elip = self.action.args.ellipticity
-            elip_axes.set_title(f"ellipticity = {avg_elip:.2f} ")
-            nstars, bins, p = elip_axes.hist(self.action.args.objects['ellipticity'],
-                                             bins=np.arange(0.9,2.5,0.05),
-                                             color='b', alpha=0.5)
-            elip_axes.plot([avg_elip, avg_elip], [0,max(nstars)*1.2], 'r-', alpha=0.5)
-            elip_axes.set_ylabel('N stars')
-            elip_axes.set_ylim(0,max(nstars)*1.2)
-            elip_axes.set_xlabel('ellipticity')
-        if self.action.args.associated_calibrators is not None:
-            nstars, bins, p = elip_axes.hist(self.action.args.associated_calibrators['ellipticity'],
-                                             bins=np.arange(0.9,2.5,0.05),
-                                             color='r', alpha=0.5)
-        self.log.debug(f'  Done')
+#         if self.action.args.objects is not None:
+#             self.log.debug(f'  Generating histogram of ellipticity values')
+#             elip_axes = plt.axes(plotpos[1][1])
+#             avg_elip = self.action.args.ellipticity
+#             elip_axes.set_title(f"ellipticity = {avg_elip:.2f} ")
+#             nstars, bins, p = elip_axes.hist(self.action.args.objects['ellipticity'],
+#                                              bins=np.arange(0.9,2.5,0.05),
+#                                              color='b', alpha=0.5)
+#             elip_axes.plot([avg_elip, avg_elip], [0,max(nstars)*1.2], 'r-', alpha=0.5)
+#             elip_axes.set_ylabel('N stars')
+#             elip_axes.set_ylim(0,max(nstars)*1.2)
+#             elip_axes.set_xlabel('ellipticity')
+#         if self.action.args.associated_calibrators is not None:
+#             nstars, bins, p = elip_axes.hist(self.action.args.associated_calibrators['ellipticity'],
+#                                              bins=np.arange(0.9,2.5,0.05),
+#                                              color='r', alpha=0.5)
+#         self.log.debug(f'  Done')
 
 
         ##-------------------------------------------------------------------------
@@ -255,13 +304,56 @@ class RenderJPEG(BasePrimitive):
         jpeg_axes2 = plt.axes(plotpos[2][1])
         x0 = int(im.shape[1] / 2)
         y0 = int(im.shape[0] / 2)
-        dx = 200
-        dy = 150
+        dx = 500
+        dy = 325
         central_im = im[y0-dy:y0+dy,x0-dx:x0+dx]
         jpeg_axes2.set_title(f"Central {2*dx:d}x{2*dy} pixels")
         jpeg_axes2.imshow(central_im, cmap=plt.cm.gray_r, vmin=vmin, vmax=vmax, origin='lower')
         self.log.debug(f'  Done')
 
+        ##-------------------------------------------------------------------------
+        # Overlay Extracted (blue)
+        if self.cfg['jpeg'].getboolean('overplot_extracted', False) is True\
+                and self.action.args.objects is not None:
+            self.log.debug(f'  Overlay extracted stars')
+            titlestr += f'blue=extracted({len(self.action.args.objects)}) '
+            radius = marker_size/binning
+            for star in self.action.args.objects:
+                x = star['x']-x0+dx
+                y = star['y']-y0+dy
+                if x > 0 and x < 2*dx and y > 0 and y < 2*dy:
+                    jpeg_axes2.plot([x, x], [y+radius, y+2.5*radius], 'b', alpha=0.3)
+                    jpeg_axes2.plot([x, x], [y-radius, y-2.5*radius], 'b', alpha=0.3)
+                    jpeg_axes2.plot([x-radius, x-2.5*radius], [y, y], 'b', alpha=0.3)
+                    jpeg_axes2.plot([x+radius, x+2.5*radius], [y, y], 'b', alpha=0.3)
+            self.log.debug(f'  Done')
+
+        ##-------------------------------------------------------------------------
+        # Overlay Calibrators (red)
+        if self.cfg['jpeg'].getboolean('overplot_calibrators', False) is True\
+                and self.action.args.associated_calibrators is not None\
+                and self.action.args.wcs is not None:
+            self.log.debug(f'  Overlay measured calibration stars')
+            calibrators = self.action.args.associated_calibrators
+            titlestr += f'red=calibrators({len(calibrators)}) '
+            radius = ap_radius/binning
+            for entry in calibrators:
+                if entry['apflux'] > 0:
+                    xy = (entry['x']-x0+dx, entry['y']-y0+dy)
+                    if xy[0] > 0 and xy[0] < 2*dx and xy[1] > 0 and xy[1] < 2*dy:
+                        c = plt.Circle(xy, radius=radius,
+                                       edgecolor='r', facecolor='none', alpha=0.5)
+                        jpeg_axes2.add_artist(c)
+#                         c = plt.Circle(xy, radius=int(np.ceil(1.5*radius)),
+#                                        edgecolor='r', facecolor='none', alpha=0.5)
+#                         jpeg_axes2.add_artist(c)
+#                         c = plt.Circle(xy, radius=int(np.ceil(2.0*radius)),
+#                                        edgecolor='r', facecolor='none', alpha=0.5)
+#                         jpeg_axes2.add_artist(c)
+            self.log.debug(f'  Done')
+
+        jpeg_axes2.set_xlim(0,2*dx)
+        jpeg_axes2.set_ylim(0,2*dy)
 
         ##-------------------------------------------------------------------------
         # Plot histogram of a
@@ -326,50 +418,6 @@ class RenderJPEG(BasePrimitive):
 #             fwhmr_axes.set_xlabel(f"radius (pix)")
 
 
-        ##-------------------------------------------------------------------------
-        # Plot instrumental mags
-#         if self.action.args.associated_calibrators is not None:
-#             flux_axes = plt.axes(plotpos[2][1])
-#             self.log.debug(f'  Generating plot of flux vs catalog magnitude')
-#             flux_axes.plot(self.action.args.associated_calibrators['mag'],
-#                            self.action.args.associated_calibrators['apflux'], 'bo',
-#                            label='photutils', mec=None, alpha=0.6)
-#             flux_axes.set_xlim(min(self.action.args.associated_calibrators['mag']),
-#                                max(self.action.args.associated_calibrators['mag']))
-#             flux_axes.set_yscale('log')
-#             flux_axes.set_ylabel('Measured Flux (e-/s)')
-#             plt.grid()
-#             plt.legend(loc='best')
-
-
-        ##-------------------------------------------------------------------------
-        # Plot instrumental mag diffs
-#         if self.action.args.associated_calibrators is not None\
-#             and self.action.args.zero_point_f0 is not None:
-#             diff_axes = plt.axes(plotpos[1][1])
-#             self.log.debug(f'  Generating plot of flux residual')
-#             deltamag = self.action.args.associated_calibrators['mag']\
-#                        - self.action.args.associated_calibrators['instmag']
-#             mean, med, std = stats.sigma_clipped_stats(deltamag)
-#             xmin = min(self.action.args.associated_calibrators['mag'])
-#             xmax = max(self.action.args.associated_calibrators['mag'])
-#             diff_axes.plot(self.action.args.associated_calibrators['mag'],
-#                            deltamag, 'bo',
-#                            label=f'Individual Zero Points',
-#                            mec=None, alpha=0.6)
-#             zp = self.action.args.zero_point
-#             label = f'Zero Point = {zp:.2f} (throughput={self.action.args.throughput:.3f})'
-#             diff_axes.plot([xmin, xmax], [zp,zp], 'k-', mec=None, alpha=0.6,
-#                            label=label)
-#             diff_axes.plot([xmin, xmax], [zp+0.1,zp+0.1], 'r-', mec=None, alpha=0.6)
-#             diff_axes.plot([xmin, xmax], [zp-0.1,zp-0.1], 'r-', mec=None, alpha=0.6,
-#                            label=f"+/-0.1 magnitude error (StdDev={std:.2f})")
-#             diff_axes.set_xlabel('Catalog Magnitude')
-#             diff_axes.set_xlim(xmin, xmax)
-#             diff_axes.set_ylabel('Catalog - Instrumental Mag')
-#             diff_axes.set_ylim(zp-7*std, zp+7*std)
-#             plt.legend(loc='best')
-#             plt.grid()
 
 
         ##-------------------------------------------------------------------------

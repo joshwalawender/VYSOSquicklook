@@ -327,26 +327,33 @@ class AssociateCalibratorStars(BasePrimitive):
         d_telescope = self.cfg['Telescope'].getfloat('d_primary_mm', 508)
         d_obstruction = self.cfg['Telescope'].getfloat('d_obstruction_mm', 127)
         A = 3.14*(d_telescope/2/1000)**2 - 3.14*(d_obstruction/2/1000)**2 # m^2
-        self.action.args.f0 = estimate_f0(A, band='i') # photons / sec
+        self.action.args.f0 = estimate_f0(A, band=self.action.args.band) # photons / sec
 
         for detected in self.action.args.objects:
             ra_deg, dec_deg = self.action.args.wcs.all_pix2world(detected['x'], detected['y'], 1)
             detected_coord = c.SkyCoord(ra_deg, dec_deg, frame='fk5', unit=(u.deg, u.deg))
             idx, d2d, d3d = detected_coord.match_to_catalog_sky(catalog_coords)
             if d2d[0].to(u.arcsec) < assoc_radius.to(u.arcsec):
-                associated.add_row( {'RA': self.action.args.calibration_catalog[idx]['raMean'],
-                                     'DEC': self.action.args.calibration_catalog[idx]['decMean'],
-                                     'x': detected['x'],
-                                     'y': detected['y'],
-                                     'assoc_distance': d2d[0].to(u.arcsec).value, 
-                                     'mag': self.action.args.calibration_catalog[idx][f'{self.action.args.band}MeanApMag'],
-                                     'catflux': self.action.args.f0 * 10**(-self.action.args.calibration_catalog[idx][f'{self.action.args.band}MeanApMag']/2.5), # phot/sec
-                                     'flux': detected['flux'],
-                                     'instmag': -2.5*np.log10(detected['apflux'].value),
-                                     'apflux': detected['apflux'].value,
-                                     'snr': detected['snr'].value,
-                                     'FWHM': detected['FWHM'],
-                                     } )
+#                 instmag = -2.5*np.log10(detected['apflux'].value)
+                instmag = -2.5*np.log10(detected['flux'])
+                catmag = self.action.args.calibration_catalog[idx][f'{self.action.args.band}MeanApMag']
+                zp_for_star = catmag - instmag
+                f0_for_star = 10**(zp_for_star/2.5)
+                throughput_for_star = f0_for_star/self.action.args.f0
+                if throughput_for_star < 1:
+                    associated.add_row( {'RA': self.action.args.calibration_catalog[idx]['raMean'],
+                                         'DEC': self.action.args.calibration_catalog[idx]['decMean'],
+                                         'x': detected['x'],
+                                         'y': detected['y'],
+                                         'assoc_distance': d2d[0].to(u.arcsec).value, 
+                                         'mag': catmag,
+                                         'catflux': self.action.args.f0 * 10**(-self.action.args.calibration_catalog[idx][f'{self.action.args.band}MeanApMag']/2.5), # phot/sec
+                                         'flux': detected['flux'],
+                                         'instmag': instmag,
+                                         'apflux': detected['apflux'].value,
+                                         'snr': detected['snr'].value,
+                                         'FWHM': detected['FWHM'],
+                                         } )
         if len(associated) < 2:
             self.action.args.associated_calibrators = None
             return self.action.args
@@ -356,7 +363,8 @@ class AssociateCalibratorStars(BasePrimitive):
         self.action.args.associated_calibrators.sort('catflux')
 
         magdiffs = associated['mag'] - associated['instmag']
-        mean, med, std = stats.sigma_clipped_stats(magdiffs)
+        mean, med, std = stats.sigma_clipped_stats(magdiffs,
+                               sigma_lower=4, sigma_upper=2, maxiters=5)
         self.action.args.zero_point = med
         self.action.args.zero_point_f0 = 10**(self.action.args.zero_point/2.5)
         self.action.args.throughput = self.action.args.zero_point_f0/self.action.args.f0
