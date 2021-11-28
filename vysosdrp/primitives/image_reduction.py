@@ -5,6 +5,7 @@ import logging
 import re
 import subprocess
 from matplotlib import pyplot as plt
+import pymongo
 
 import numpy as np
 from astropy.io import fits
@@ -77,7 +78,6 @@ class ReadFITS(BasePrimitive):
 
         ## Connect to mongo
         try:
-            import pymongo
             self.log.debug('Connecting to mongo db')
             self.action.args.mongoclient = pymongo.MongoClient('localhost', 27017)
             self.action.args.images = self.action.args.mongoclient.vysos['images']
@@ -131,8 +131,32 @@ class ReadFITS(BasePrimitive):
             self.log.info('  Opening file as V5 data')
             self.action.args.kd = fits_reader(self.action.args.fitsfilepath,
                                               datatype=VYSOS5)
-#             self.log.info('  Cropping to inner 2k x 2k')
-#             self.action.args.kd.pixeldata[0] = self.action.args.kd.pixeldata[0][1024:3076,1024:3076]
+
+        # Pull focus info from database
+        try:
+            self.log.info(f'  Reading focus data from DB')
+            status_collection = self.action.args.mongoclient.vysos[f'{self.action.args.kd.instrument}status']
+            date_obs = datetime.strptime(self.action.args.kd.get('DATE-OBS'), '%Y-%m-%dT%H:%M:%S')
+            querydict = {"date": {"$gt": date_obs, "$lt": date_obs+timedelta(minutes=2)},
+                         "telescope": self.action.args.kd.instrument}
+            focus_pos = [entry['focuser_position'] for entry in\
+                         status_collection.find(querydict).sort(\
+                         [('date', pymongo.ASCENDING)])]
+            focus_temp = [entry['focuser_temperature'] for entry in\
+                          status_collection.find(querydict).sort(\
+                          [('date', pymongo.ASCENDING)])]
+            pmean, pmed, pstd = stats.sigma_clipped_stats(focus_pos)
+            tmean, tmed, tstd = stats.sigma_clipped_stats(focus_temp)
+            if pstd < 2 and tstd < 0.4:
+                self.action.args.focus_position = pmed
+                self.action.args.focus_temperature = tmed
+                self.log.info(f"  Focus Position: {pmean:.0f} {pmed:.0f} {pstd:.2f}")
+                self.log.info(f"  Focus Temperature: {tmean:.1f} {tmed:.1f} {tstd:.3f}")
+            else:
+                self.log.warning(f"  Focus std dev too high: {pstd:.1f} {tstd:.1f}")
+        except Exception as e:
+            self.log.warning(f'  Failed to read focus data from DB')
+            self.log.warning(e)
 
         return self.action.args
 

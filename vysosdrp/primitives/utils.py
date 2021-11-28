@@ -154,7 +154,7 @@ def download_vizier(pointing, radius, catalog='UCAC4', band='i', maglimit=None):
 ##-----------------------------------------------------------------------------
 ## Function: get_panstarrs
 ##-----------------------------------------------------------------------------
-def get_panstarrs(cfg, field_name, pointing, filter, radius=0.35,
+def get_panstarrs(cfg, field_name, pointing, filter, radius=0.40,
                   maglimit=None, log=None):
     catalogname = cfg['Photometry'].get('calibration_catalog')
     band = {'PSi': 'i', 'PSr': 'r'}[filter]
@@ -389,6 +389,11 @@ class Record(BasePrimitive):
             self.image_info['alt'] = float(self.action.args.kd.get('ALTITUDE'))
         if self.action.args.kd.get('AIRMASS', None) is not None:
             self.image_info['airmass'] = float(self.action.args.kd.get('AIRMASS'))
+        # From database
+        if hasattr(self.action.args, 'focus_position'):
+            self.image_info['focus_position'] = self.action.args.focus_position
+        if hasattr(self.action.args, 'focus_temperature'):
+            self.image_info['focus_temperature'] = self.action.args.focus_temperature
         # From Science Image Analysis
         if hasattr(self.action.args, 'header_pointing'):
             if self.action.args.header_pointing is not None:
